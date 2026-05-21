@@ -81,6 +81,41 @@ FastAPI generates an OpenAPI spec at runtime, served at:
 
 Use the Swagger UI to try endpoints directly — paste an `Authorization: Bearer <token>` header from a `/api/auth/login` response and the rest of the surface becomes interactive.
 
+#### Endpoint catalogue
+
+| Method   | Path                                       | Role        | Purpose                                                                 |
+|----------|--------------------------------------------|-------------|-------------------------------------------------------------------------|
+| `POST`   | `/api/auth/register`                       | public      | Candidate signup (HR is gated by `ALLOW_HR_SELF_REGISTER`).             |
+| `POST`   | `/api/auth/login`                          | public      | Issue a 30-min JWT.                                                     |
+| `GET`    | `/api/auth/me`                             | any         | Current user.                                                           |
+| `GET`    | `/api/health`                              | public      | `{ api, db, cache }` probe.                                             |
+| `GET`    | `/api/jobs/`                               | any         | List jobs (filters + sort + paginated).                                 |
+| `POST`   | `/api/jobs/`                               | HR          | Create a job.                                                           |
+| `GET`    | `/api/jobs/recommended`                    | candidate   | Profile-scored job recommendations (404 if no profile).                 |
+| `GET`    | `/api/jobs/{id}`                           | any         | One job (candidates only see active).                                   |
+| `PATCH`  | `/api/jobs/{id}`                           | HR (owner)  | Update job fields (not status).                                         |
+| `PATCH`  | `/api/jobs/{id}/status`                    | HR (owner)  | Active / Paused / Closed.                                               |
+| `POST`   | `/api/jobs/{id}/close`                     | HR (owner)  | Soft delete — flips status to Closed, preserves applications.           |
+| `GET`    | `/api/applications/mine`                   | candidate   | Candidate's own applications.                                           |
+| `POST`   | `/api/applications/`                       | candidate   | Apply to a job.                                                         |
+| `DELETE` | `/api/applications/{id}`                   | candidate   | Withdraw (Applied stage only).                                          |
+| `GET`    | `/api/applications/{id}`                   | owner       | Full detail **including identity** — drives the Profile drawer.         |
+| `PATCH`  | `/api/applications/{id}/stage`             | HR (owner)  | Move between stages. Terminal stages lock further transitions.          |
+| `GET`    | `/api/applications/{id}/timeline`          | owner       | Immutable stage event history.                                          |
+| `GET`    | `/api/applications/{id}/notes`             | HR (owner)  | List private notes.                                                     |
+| `POST`   | `/api/applications/{id}/notes`             | HR (owner)  | Add a private note.                                                     |
+| `GET`    | `/api/applications/by-job/{id}`            | HR (owner)  | Applicants for one job (anonymized).                                    |
+| `GET`    | `/api/applications/by-job/{id}/ranked`     | HR (owner)  | Applicants scored + sorted by fit (anonymized).                         |
+| `GET`    | `/api/applications/by-job/{id}/export`     | HR (owner)  | CSV download of the filtered set (anonymized).                          |
+| `GET`    | `/api/applications/all`                    | HR          | Cross-job applicant feed scoped to the HR's own jobs.                   |
+| `GET`    | `/api/bookmarks/`                          | candidate   | Saved jobs.                                                             |
+| `POST`   | `/api/bookmarks/`                          | candidate   | Bookmark a job (idempotent, 200 on repeat).                             |
+| `DELETE` | `/api/bookmarks/{job_id}`                  | candidate   | Remove a bookmark.                                                      |
+| `GET`    | `/api/profile/`                            | candidate   | Current profile (null if not set).                                      |
+| `PUT`    | `/api/profile/`                            | candidate   | Create or update the profile.                                           |
+| `DELETE` | `/api/profile/`                            | candidate   | Clear the saved profile.                                                |
+| `GET`    | `/api/dashboard/hr`                        | HR          | Stats + top-5 jobs funnel.                                              |
+
 ### Running tests
 
 ```bash
@@ -95,7 +130,9 @@ For local frontend development without Docker, `cd frontend && npm install && np
 
 ---
 
-## 4. Test credentials
+## 4. Demo credentials (assessment only)
+
+> ⚠️ These accounts ship pre-seeded in the demo container for the assessor's convenience. They are intentionally weak — do **not** copy these passwords into a production deployment.
 
 | Role      | Email                  | Password         |
 |-----------|------------------------|------------------|
@@ -103,6 +140,8 @@ For local frontend development without Docker, `cd frontend && npm install && np
 | Candidate | `candidate@test.com`   | `Candidate@1234` |
 
 The HR user owns five sample jobs and the candidate has two seeded applications on the pipeline, so both dashboards have something to look at on first login. Two additional demo candidates (`rohan.designer@test.com`, `sneha.engineer@test.com`, both `Test@1234`) populate the HR pipeline for filtering demos.
+
+**HR self-registration is disabled by default** (`ALLOW_HR_SELF_REGISTER=false`); the public `/register` form only accepts candidates. HR accounts ship via the seed.
 
 ---
 
@@ -112,16 +151,16 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 
 | Feature                          | How to reach it                                              |
 |----------------------------------|--------------------------------------------------------------|
-| Dashboard (counts + funnel)      | Log in as HR → lands on `/hr`.                               |
-| **Cross-job candidate inbox**    | `Candidates` in the nav (`/hr/applicants`). One screen showing every applicant on every job the HR owns; per-stage counters, "Filter by job" dropdown, all the per-job filters, inline stage moves and notes drawer — answers "who applied this week across all my jobs". |
+| Dashboard (counts + funnel)      | Log in as HR → lands on `/hr`. Aggregated pipeline volume + Top 5 jobs by applications. |
+| **Cross-job candidate inbox**    | `Candidates` in the nav (`/hr/applicants`). One screen showing every applicant on every job the HR owns; per-stage counters, "Filter by job" dropdown, all the per-job filters, inline stage moves and notes drawer. |
 | Post a new job                   | `/hr/jobs` → **+ Post a job**, or top-right shortcut.        |
-| Edit / pause / close / delete    | `/hr/jobs` → per-row controls.                               |
+| Edit / pause / close / duplicate | `/hr/jobs` → per-row controls. `⧉ Duplicate` creates a Paused copy with " (copy)" appended; `Close` is a soft delete (status → Closed) so application history survives. |
 | Per-job applicants               | Job row → **Applicants** opens `/hr/jobs/:id/applicants`.    |
-| Pipeline filters                 | Left sidebar: skills (any/all), experience range, current/expected CTC ceiling, max notice, applied-date range, stage, keyword search across cover note and skills, plus four sort modes (recent, lowest expected CTC, shortest notice, most experienced). |
-| Move candidate between stages    | Per-row stage dropdown on either applicants table. Each change is recorded with the time it happened and who made it. |
-| **AI fit ranking**               | **Rank by fit score** toggle on the per-job applicants page. Sorts candidates by a 0–100 score (skill overlap + experience fit + CTC alignment + notice bonus), highlights matched skills green, tooltip on the badge shows the breakdown. |
-| **CSV export**                   | **⬇ Export CSV** button next to the rank toggle. Downloads the current filter set with the same anonymized columns the table shows. |
-| Profile / notes drawer           | **View profile** on a row opens a focus-trapped drawer revealing name + email + resume + cover note + private HR notes + the stage timeline. |
+| Pipeline filters                 | Left sidebar: skills (any/all), experience range, current/expected CTC ceiling, max notice (discrete buckets: Immediate / 15 / 30 / 60 / 90), applied-date range, stage, keyword search across cover note and skills, plus four sort modes (recent, lowest expected CTC, shortest notice, most experienced). |
+| Move candidate between stages    | Per-row stage dropdown on either applicants table. Each change is recorded with the time it happened and who made it. Terminal stages (Hired / Rejected) lock further transitions. |
+| **AI fit ranking**               | **Rank by fit score** toggle on the per-job applicants page. Sorts by a 0–100 score (skill overlap + experience fit + CTC alignment + notice bonus); the colour-coded badge has a hover/focus popover with the breakdown and matched skills are highlighted green. |
+| **CSV export**                   | **⬇ Export CSV** button next to the rank toggle. Streams the current filter set with the same anonymized columns the table shows. |
+| Profile / notes drawer           | **View profile** on a row opens a focus-trapped drawer that fetches the full identity (name + email + resume + cover note) only on demand — the list response is anonymized. Notes + stage timeline live in the same drawer. |
 | Private internal notes           | Inside the profile drawer. Candidates never see these notes (enforced both in the UI and the API). |
 
 ### Candidate
@@ -132,10 +171,11 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 | Filter & search                  | Left sidebar: keyword, department, location type, employment type, experience range, CTC range, skills (comma-separated). |
 | Deadline countdown               | Every job card and the job detail page show a live *Closes in X days / Closes today / Closed* pill. |
 | Bookmark a job                   | **☆ Save** on job card or detail page; full list at `/me/bookmarks`. |
-| Apply to a job                   | Job detail page → **Apply now**. Form validates resume URL, captures cover note, current/expected CTC, notice period, years of experience, key skills. Duplicate applications are rejected at the API. |
-| Track applications + timeline    | `/me/applications` — stage badge per application; click *Timeline* to see the full progression with timestamps, including remaining stages as greyed pending markers. |
+| Apply to a job                   | Job detail page → **Apply now**. Form validates resume URL, captures cover note, current/expected CTC, notice period, years of experience, key skills. Duplicate applications are rejected at the API. Jobs whose deadline has passed reject new applications. |
+| Track applications + timeline    | `/me/applications` — stage badge per application; click *Timeline* to see the full progression with timestamps, including remaining stages as greyed pending markers. Sort by recently applied / recently updated. |
 | Withdraw                         | `/me/applications` → row action; only available while in the *Applied* stage. |
-| **Profile + Recommended jobs**   | `/me/profile` — set your skills, experience, expected CTC, preferred location once. `/jobs` then offers a **Recommended** tab that ranks every active job against your profile with a match score on each card. |
+| **Profile + Recommended jobs**   | `/me/profile` — set your skills, experience, expected CTC, and any combination of preferred locations (Remote / Hybrid / On-site) once. `/jobs?tab=recommended` ranks every active job against your profile with a match score on each card; matching skills get green chips. |
+| Infinite scroll                  | `/jobs` (All-jobs tab) auto-loads the next batch of 12 jobs as you scroll near the bottom (IntersectionObserver); explicit `Load more` is the keyboard fallback. |
 
 ---
 
