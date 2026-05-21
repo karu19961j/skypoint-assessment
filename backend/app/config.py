@@ -90,6 +90,20 @@ class Settings(BaseSettings):
     # ---------- feature flags ----------
     allow_hr_self_register: bool = False
 
+    # ---------- object storage (MinIO in dev, real S3 in prod) ----------
+    # Backend talks to MinIO over the docker network at startup to create
+    # the resume bucket and stream uploads/downloads through. Same code
+    # path against AWS S3 in prod — just swap the endpoint + creds.
+    minio_endpoint: str = "http://minio:9000"
+    minio_access_key: SecretStr = SecretStr("change-me")
+    minio_secret_key: SecretStr = SecretStr("change-me")
+    minio_bucket: str = "resumes"
+    minio_region: str = "us-east-1"
+
+    # Resume upload cap (in bytes). Enforced both client-side (fast feedback)
+    # and server-side (the authoritative gate).
+    resume_max_bytes: int = Field(default=15 * 1024 * 1024, ge=1, le=100 * 1024 * 1024)
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

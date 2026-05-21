@@ -62,10 +62,16 @@ def main() -> int:
     in_settings = keys_in_settings()
     in_compose = keys_referenced_in_compose(COMPOSE_FILE)
 
-    # Env vars used by sibling services (postgres) but not consumed by
-    # the Python backend. Document them, but don't expect them in
-    # Settings.
-    sibling_keys = {"POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"}
+    # Env vars used by sibling services (postgres, minio) but not consumed
+    # by the Python backend's pydantic Settings. Document them, but don't
+    # expect them as Settings fields.
+    sibling_keys = {
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_DB",
+        "MINIO_ROOT_USER",
+        "MINIO_ROOT_PASSWORD",
+    }
 
     settings_or_siblings = in_settings | sibling_keys
 
