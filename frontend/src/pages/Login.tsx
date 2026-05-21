@@ -45,17 +45,41 @@ export function LoginPage() {
         <h1 className="mb-1 text-xl font-semibold">Welcome back</h1>
         <p className="mb-4 text-sm text-slate-500">Log in to manage jobs or applications.</p>
 
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <ErrorBanner message={error} />
           <div>
-            <label className="label" htmlFor="email">Email</label>
-            <input id="email" type="email" autoComplete="email" className="input" {...register("email")} />
-            {errors.email && <p className="mt-1 text-xs text-rose-600">{errors.email.message}</p>}
+            <label className="label" htmlFor="login-email">Email</label>
+            <input
+              id="login-email"
+              type="email"
+              autoComplete="email"
+              className="input"
+              aria-invalid={errors.email ? "true" : undefined}
+              aria-describedby={errors.email ? "login-email-error" : undefined}
+              {...register("email")}
+            />
+            {errors.email && (
+              <p id="login-email-error" role="alert" className="mt-1 text-xs text-rose-600">
+                {errors.email.message}
+              </p>
+            )}
           </div>
           <div>
-            <label className="label" htmlFor="password">Password</label>
-            <input id="password" type="password" autoComplete="current-password" className="input" {...register("password")} />
-            {errors.password && <p className="mt-1 text-xs text-rose-600">{errors.password.message}</p>}
+            <label className="label" htmlFor="login-password">Password</label>
+            <input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              className="input"
+              aria-invalid={errors.password ? "true" : undefined}
+              aria-describedby={errors.password ? "login-password-error" : undefined}
+              {...register("password")}
+            />
+            {errors.password && (
+              <p id="login-password-error" role="alert" className="mt-1 text-xs text-rose-600">
+                {errors.password.message}
+              </p>
+            )}
           </div>
           <button type="submit" className="btn-primary w-full" disabled={isSubmitting}>
             {isSubmitting ? "Signing in…" : "Sign in"}

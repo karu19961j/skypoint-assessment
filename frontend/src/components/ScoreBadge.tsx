@@ -14,31 +14,65 @@ function tone(total: number): string {
   return "bg-rose-100 text-rose-800 ring-rose-200";
 }
 
-export function ScoreBadge({ score }: { score: ScoreLike }) {
-  const parts = [
-    `Skills ${score.skill}/50`,
-    `Exp ${score.exp}/30`,
-    `CTC ${score.ctc}/20`,
-  ];
-  if (typeof score.notice === "number") parts.push(`Notice ${score.notice}/5`);
-  if (typeof score.location === "number" && score.location > 0) {
-    parts.push(`Location +${score.location}`);
-  }
+interface BreakdownRow {
+  label: string;
+  value: number;
+  max: number;
+}
 
-  const tooltip =
-    parts.join(" · ") +
+function rows(score: ScoreLike): BreakdownRow[] {
+  const out: BreakdownRow[] = [
+    { label: "Skills", value: score.skill, max: 50 },
+    { label: "Experience", value: score.exp, max: 30 },
+    { label: "CTC fit", value: score.ctc, max: 20 },
+  ];
+  if (typeof score.notice === "number") {
+    out.push({ label: "Notice bonus", value: score.notice, max: 5 });
+  }
+  if (typeof score.location === "number" && score.location > 0) {
+    out.push({ label: "Location bonus", value: score.location, max: 10 });
+  }
+  return out;
+}
+
+export function ScoreBadge({ score }: { score: ScoreLike }) {
+  const breakdown = rows(score);
+  const ariaSummary =
+    `Fit score ${score.total} out of 100. ` +
+    breakdown.map((r) => `${r.label} ${r.value} of ${r.max}`).join(", ") +
     (score.matched_skills.length
-      ? `\nMatched: ${score.matched_skills.join(", ")}`
-      : "");
+      ? `. Matched skills: ${score.matched_skills.join(", ")}.`
+      : ".");
 
   return (
-    <span
-      className={`inline-flex items-baseline gap-1 rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ${tone(score.total)}`}
-      title={tooltip}
-      aria-label={`Fit score ${score.total} out of 100. ${parts.join(", ")}.`}
-    >
-      <span>{score.total}</span>
-      <span className="text-[10px] font-normal opacity-70">/100</span>
+    <span className="group relative inline-flex" tabIndex={0} aria-label={ariaSummary}>
+      <span
+        className={`inline-flex items-baseline gap-1 rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ${tone(score.total)}`}
+      >
+        <span>{score.total}</span>
+        <span className="text-[10px] font-normal opacity-70">/100</span>
+      </span>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 hidden w-60 -translate-x-1/2 rounded-lg bg-slate-900 px-3 py-2 text-left text-xs text-white shadow-xl group-hover:block group-focus-within:block"
+      >
+        <span className="mb-1 block font-semibold text-white/90">Fit breakdown</span>
+        <span className="block space-y-0.5">
+          {breakdown.map((r) => (
+            <span key={r.label} className="flex items-baseline justify-between">
+              <span className="text-white/70">{r.label}</span>
+              <span className="font-mono text-white">
+                {r.value}/{r.max}
+              </span>
+            </span>
+          ))}
+        </span>
+        {score.matched_skills.length ? (
+          <span className="mt-2 block border-t border-white/15 pt-2 text-[11px] leading-snug text-white/80">
+            Matched: {score.matched_skills.join(", ")}
+          </span>
+        ) : null}
+      </span>
     </span>
   );
 }

@@ -53,26 +53,60 @@ export function RegisterPage() {
           Sign up as a candidate to apply, or as HR to post jobs.
         </p>
 
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <ErrorBanner message={error} />
           <div>
-            <label className="label" htmlFor="full_name">Full name</label>
-            <input id="full_name" className="input" {...register("full_name")} />
-            {errors.full_name && <p className="mt-1 text-xs text-rose-600">{errors.full_name.message}</p>}
+            <label className="label" htmlFor="reg-full-name">Full name</label>
+            <input
+              id="reg-full-name"
+              className="input"
+              aria-invalid={errors.full_name ? "true" : undefined}
+              aria-describedby={errors.full_name ? "reg-full-name-error" : undefined}
+              {...register("full_name")}
+            />
+            {errors.full_name && (
+              <p id="reg-full-name-error" role="alert" className="mt-1 text-xs text-rose-600">
+                {errors.full_name.message}
+              </p>
+            )}
           </div>
           <div>
-            <label className="label" htmlFor="email">Email</label>
-            <input id="email" type="email" autoComplete="email" className="input" {...register("email")} />
-            {errors.email && <p className="mt-1 text-xs text-rose-600">{errors.email.message}</p>}
+            <label className="label" htmlFor="reg-email">Email</label>
+            <input
+              id="reg-email"
+              type="email"
+              autoComplete="email"
+              className="input"
+              aria-invalid={errors.email ? "true" : undefined}
+              aria-describedby={errors.email ? "reg-email-error" : undefined}
+              {...register("email")}
+            />
+            {errors.email && (
+              <p id="reg-email-error" role="alert" className="mt-1 text-xs text-rose-600">
+                {errors.email.message}
+              </p>
+            )}
           </div>
           <div>
-            <label className="label" htmlFor="password">Password</label>
-            <input id="password" type="password" autoComplete="new-password" className="input" {...register("password")} />
-            {errors.password && <p className="mt-1 text-xs text-rose-600">{errors.password.message}</p>}
+            <label className="label" htmlFor="reg-password">Password</label>
+            <input
+              id="reg-password"
+              type="password"
+              autoComplete="new-password"
+              className="input"
+              aria-invalid={errors.password ? "true" : undefined}
+              aria-describedby={errors.password ? "reg-password-error" : undefined}
+              {...register("password")}
+            />
+            {errors.password && (
+              <p id="reg-password-error" role="alert" className="mt-1 text-xs text-rose-600">
+                {errors.password.message}
+              </p>
+            )}
           </div>
           <div>
-            <label className="label" htmlFor="role">Account type</label>
-            <select id="role" className="input" {...register("role")}>
+            <label className="label" htmlFor="reg-role">Account type</label>
+            <select id="reg-role" className="input" {...register("role")}>
               <option value="candidate">Candidate &mdash; apply to jobs</option>
               <option value="hr">HR &mdash; post jobs and review applications</option>
             </select>

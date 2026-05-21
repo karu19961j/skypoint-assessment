@@ -1,7 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
+from app.db import engine
 from app.routers import applications, auth, bookmarks, dashboard, jobs, profile
 
 settings = get_settings()
@@ -35,4 +38,21 @@ app.include_router(profile.router, prefix="/api/profile", tags=["profile"])
 
 @app.get("/api/health", tags=["health"])
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    """Service health probe.
+
+    Returns the status of each component the API depends on. `cache` is
+    intentionally reported as "disabled" — the demo runs without Redis;
+    a production deployment would replace this with a real PING check.
+    """
+    db_status = "ok"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        db_status = "down"
+
+    return {
+        "api": "ok",
+        "db": db_status,
+        "cache": "disabled",
+    }
