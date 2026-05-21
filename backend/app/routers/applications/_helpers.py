@@ -10,7 +10,7 @@ Split out so:
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Query as _Query, status
 from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,9 @@ from app.models import (
     Application,
     ApplicationEvent,
     ApplicationStage,
+    Job,
     User,
+    UserRole,
 )
 from app.schemas.application import (
     ApplicationDetail,
@@ -65,6 +67,61 @@ def get_application_or_404(db: Session, app_id: int) -> Application:
             status_code=status.HTTP_404_NOT_FOUND, detail="Application not found"
         )
     return app
+
+
+# ---------- ownership guards ----------
+#
+# The same "is this HR allowed to touch this application?" check showed up
+# six times in lifecycle.py, three times in discovery.py, and once in
+# export.py. Extracted into helpers so every endpoint touches one row of
+# logic and the 403 message stays consistent.
+
+
+def _hr_owns_application(application: Application, user: User) -> bool:
+    return application.job is not None and application.job.hr_id == user.id
+
+
+def ensure_hr_owns_application(application: Application, user: User) -> None:
+    """Raise 403 if `user` (HR) doesn't own the application's job."""
+    if not _hr_owns_application(application, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not own this application.",
+        )
+
+
+def ensure_candidate_owns_application(application: Application, user: User) -> None:
+    """Raise 403 if `user` (candidate) isn't the application's owner."""
+    if application.candidate_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not your application."
+        )
+
+
+def ensure_can_view_application(application: Application, user: User) -> None:
+    """Per-role ownership check.
+
+    Candidate must own the application; HR must own the application's job.
+    Used by endpoints that both roles can hit (detail + timeline).
+    """
+    if user.role == UserRole.candidate:
+        ensure_candidate_owns_application(application, user)
+    else:
+        ensure_hr_owns_application(application, user)
+
+
+def get_hr_owned_job_or_403(db: Session, job_id: int, user: User) -> Job:
+    """Resolve a job by id, 404 if missing, 403 if not owned by `user`.
+
+    Combines the two checks that every HR-only `/by-job/{id}*` endpoint
+    runs, so the route handler stays focused on the actual work.
+    """
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.hr_id != user.id:
+        raise HTTPException(status_code=403, detail="You do not own this job.")
+    return job
 
 
 # ---------- filter struct ----------
@@ -187,6 +244,33 @@ def filters_from_query(
         applied_before=applied_before,
         q=q,
         sort=sort,
+    )
+
+
+# FastAPI-style query-params dependency. `Annotated[ApplicantFilters,
+# Depends(applicant_filter_params)]` on a route lets us declare the 14
+# filter knobs in exactly one place — discovery + export + the cross-job
+# feed all reuse this rather than each redeclaring the same Query()s.
+def applicant_filter_params(
+    stage: ApplicationStage | None = None,
+    skills_any: list[str] | None = _Query(default=None),
+    skills_all: list[str] | None = _Query(default=None),
+    exp_min: int | None = _Query(default=None, ge=0),
+    exp_max: int | None = _Query(default=None, ge=0),
+    current_ctc_min: int | None = _Query(default=None, ge=0),
+    current_ctc_max: int | None = _Query(default=None, ge=0),
+    expected_ctc_min: int | None = _Query(default=None, ge=0),
+    expected_ctc_max: int | None = _Query(default=None, ge=0),
+    notice_max_days: int | None = _Query(default=None, ge=0),
+    applied_after: date | None = None,
+    applied_before: date | None = None,
+    q: str | None = None,
+    sort: ApplicantSort = ApplicantSort.recent,
+) -> ApplicantFilters:
+    return filters_from_query(
+        stage, skills_any, skills_all, exp_min, exp_max,
+        current_ctc_min, current_ctc_max, expected_ctc_min, expected_ctc_max,
+        notice_max_days, applied_after, applied_before, q, sort,
     )
 
 

@@ -39,7 +39,14 @@ from app.schemas.application import (
 )
 from app.sorts import MyApplicationSort
 
-from ._helpers import detail, get_application_or_404, transition_stage
+from ._helpers import (
+    detail,
+    ensure_can_view_application,
+    ensure_candidate_owns_application,
+    ensure_hr_owns_application,
+    get_application_or_404,
+    transition_stage,
+)
 
 router = APIRouter()
 
@@ -146,8 +153,7 @@ def withdraw_application(
     current_user: Annotated[User, Depends(require_role(UserRole.candidate))],
 ) -> None:
     app = get_application_or_404(db, application_id)
-    if app.candidate_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not your application.")
+    ensure_candidate_owns_application(app, current_user)
     if app.stage != ApplicationStage.applied:
         raise HTTPException(
             status_code=400,
@@ -175,14 +181,7 @@ def get_application_detail(
     before this catch-all `/{application_id}` route.
     """
     app = get_application_or_404(db, application_id)
-    if current_user.role == UserRole.candidate:
-        if app.candidate_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Not your application.")
-    else:
-        if app.job is None or app.job.hr_id != current_user.id:
-            raise HTTPException(
-                status_code=403, detail="You do not own this application."
-            )
+    ensure_can_view_application(app, current_user)
     return detail(app, include_identity=True)
 
 
@@ -203,10 +202,7 @@ def update_stage(
     current_user: Annotated[User, Depends(require_role(UserRole.hr))],
 ) -> ApplicationDetail:
     app = get_application_or_404(db, application_id)
-    if app.job is None or app.job.hr_id != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="You do not own this application."
-        )
+    ensure_hr_owns_application(app, current_user)
     if app.stage in _TERMINAL_STAGES and payload.stage != app.stage:
         raise HTTPException(
             status_code=400,
@@ -228,14 +224,7 @@ def get_timeline(
     applications on the jobs they own.
     """
     app = get_application_or_404(db, application_id)
-    if current_user.role == UserRole.candidate:
-        if app.candidate_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Not your application.")
-    else:
-        if app.job is None or app.job.hr_id != current_user.id:
-            raise HTTPException(
-                status_code=403, detail="You do not own this application."
-            )
+    ensure_can_view_application(app, current_user)
 
     events = db.scalars(
         select(ApplicationEvent)
@@ -252,10 +241,7 @@ def list_notes(
     current_user: Annotated[User, Depends(require_role(UserRole.hr))],
 ) -> list[ApplicationNoteOut]:
     app = get_application_or_404(db, application_id)
-    if app.job is None or app.job.hr_id != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="You do not own this application."
-        )
+    ensure_hr_owns_application(app, current_user)
     notes = (
         db.scalars(
             select(ApplicationNote)
@@ -278,10 +264,7 @@ def create_note(
     current_user: Annotated[User, Depends(require_role(UserRole.hr))],
 ) -> ApplicationNoteOut:
     app = get_application_or_404(db, application_id)
-    if app.job is None or app.job.hr_id != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="You do not own this application."
-        )
+    ensure_hr_owns_application(app, current_user)
     note = ApplicationNote(
         application_id=application_id,
         hr_id=current_user.id,
