@@ -119,7 +119,10 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 | Per-job applicants               | Job row → **Applicants** opens `/hr/jobs/:id/applicants`.    |
 | Pipeline filters                 | Left sidebar: skills (any/all), experience range, current/expected CTC ceiling, max notice, applied-date range, stage, keyword search across cover note and skills, plus four sort modes (recent, lowest expected CTC, shortest notice, most experienced). |
 | Move candidate between stages    | Per-row stage dropdown on either applicants table. Each change is recorded with the time it happened and who made it. |
-| Private internal notes           | **Notes** drawer on each applicant row. Candidates never see these notes (enforced both in the UI and the API). |
+| **AI fit ranking**               | **Rank by fit score** toggle on the per-job applicants page. Sorts candidates by a 0–100 score (skill overlap + experience fit + CTC alignment + notice bonus), highlights matched skills green, tooltip on the badge shows the breakdown. |
+| **CSV export**                   | **⬇ Export CSV** button next to the rank toggle. Downloads the current filter set with the same anonymized columns the table shows. |
+| Profile / notes drawer           | **View profile** on a row opens a focus-trapped drawer revealing name + email + resume + cover note + private HR notes + the stage timeline. |
+| Private internal notes           | Inside the profile drawer. Candidates never see these notes (enforced both in the UI and the API). |
 
 ### Candidate
 
@@ -130,8 +133,9 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 | Deadline countdown               | Every job card and the job detail page show a live *Closes in X days / Closes today / Closed* pill. |
 | Bookmark a job                   | **☆ Save** on job card or detail page; full list at `/me/bookmarks`. |
 | Apply to a job                   | Job detail page → **Apply now**. Form validates resume URL, captures cover note, current/expected CTC, notice period, years of experience, key skills. Duplicate applications are rejected at the API. |
-| Track applications + timeline    | `/me/applications` — stage badge per application; click *Timeline* to see the full progression with timestamps. |
+| Track applications + timeline    | `/me/applications` — stage badge per application; click *Timeline* to see the full progression with timestamps, including remaining stages as greyed pending markers. |
 | Withdraw                         | `/me/applications` → row action; only available while in the *Applied* stage. |
+| **Profile + Recommended jobs**   | `/me/profile` — set your skills, experience, expected CTC, preferred location once. `/jobs` then offers a **Recommended** tab that ranks every active job against your profile with a match score on each card. |
 
 ---
 
@@ -233,12 +237,17 @@ skypoint-assessment/
 
 These were added on top of the brief's checklist to make the app more memorable:
 
+- **AI candidate ranking.** `GET /api/applications/by-job/{id}/ranked` scores every applicant against the job requirements on a pure-logic 0–100 scale: 50 pts skill overlap, 30 pts experience fit, 20 pts CTC alignment, +5 pts immediate-joiner bonus, with deterministic decay curves outside each band (see `backend/app/services/ranking.py`). The HR applicants table has a **Rank by fit score** toggle that switches to ranked-mode, surfaces a `XX/100` badge per row with a tooltip showing the full breakdown, and highlights matching skills in green. No LLM, no external API — fully testable.
+- **Smart job recommendations for candidates.** Candidates save a profile (skills, experience, expected CTC, preferred location); the same scoring engine, mirrored, ranks every active job against that profile and adds a +10 location bonus when the preference matches. `GET /api/jobs/recommended`; the candidate **Browse** page has an "All jobs" / "Recommended" tab, and the Recommended view renders a fit-score badge on each job card.
 - **Cross-job candidate inbox for HR.** `/hr/applicants` rolls up every applicant on every job the HR owns into one screen with per-stage counters that double as filter buttons, plus the full filter surface from the per-job view and a "Filter by job" dropdown. The backend endpoint (`GET /api/applications/all`) is HR-scoped at the SQL level via a subquery, so an HR can never see applications on jobs they don't own.
-- **Application timeline.** Every stage transition is recorded as an immutable event row (`application_events`); candidates can expand any application on `/me/applications` to see the full progression with timestamps. The same timeline shows inside the HR notes drawer.
-- **Live deadline countdown.** Job cards and the job detail page render *Closes in N days / Closes today / Closed* pills, colored by urgency, so candidates know at a glance how much time they have.
-- **Interactive API docs at `/api/docs`.** The FastAPI Swagger UI is served through the same nginx proxy, so an assessor can poke at the API without needing curl.
-- **CI on every push.** The GitHub Actions workflow runs `pytest` against a real Postgres service container and builds the production frontend bundle, so a broken commit shows up red before it hits `main`.
-- **Frontend test suite (Vitest).** Closes the “at least basic unit or integration tests” bar on both ends of the stack, not just the backend.
+- **Anonymized applicant cards + Profile drawer.** The HR list views deliberately omit candidate name, email, and resume to keep the discovery step bias-free; identity reveals only when the recruiter clicks "View profile" and opens a focus-trapped, Escape-closeable drawer that shows name + email + resume + cover note + private notes + timeline in one place.
+- **Application timeline with pending stages.** Every stage transition is recorded as an immutable event row (`application_events`); candidates can expand any application on `/me/applications` to see the full progression — completed stages with timestamps and remaining happy-path stages as greyed pending markers.
+- **CSV export.** `GET /api/applications/by-job/{id}/export` streams a `text/csv` of the current filter set with the exact columns the table shows — no name/email — so HR can drag the file into a spreadsheet.
+- **Live deadline countdown.** Job cards and the job detail page render *Closes in N days / Closes today / Closed* pills colored by urgency.
+- **Soft delete for jobs.** "Delete" closes the job (status flips to Closed) instead of removing the row, so the application history and stage timeline stay intact and the candidate's *My Applications* page never breaks.
+- **Interactive API docs at `/api/docs`.** Swagger UI served through the same nginx proxy.
+- **CI on every push.** Backend pytest against a real Postgres service container, frontend Vitest + production build, full docker compose build — all in parallel.
+- **Frontend test suite (Vitest)** covers format helpers, components, form validation, and the role-aware ProtectedRoute redirects.
 
 ---
 
@@ -250,6 +259,7 @@ These were added on top of the brief's checklist to make the app more memorable:
 - **No rate limiting / lockout** on the auth endpoints. Production would add nginx rate-limit zones or a per-IP throttle in FastAPI.
 - **Single HR user** owns the seeded jobs. Multi-HR collaboration on the same job (shared pipelines) is not modelled; each job is owned by one HR.
 - **Email verification, password reset, and account recovery** flows are intentionally out of scope.
-- **No Redis caching layer.** The HR dashboard query is small enough at the seed scale to be sub-millisecond, but a production deployment with thousands of jobs would benefit from caching the aggregations.
-- **No AI features.** A candidate-ranking model trained on past hires (or even a heuristic “fit score” combining skill overlap, experience match, and CTC fit) would be a natural next step.
-- **CSV export** of the applicants table is on the roadmap (drag-and-drop into spreadsheets is what HR actually wants).
+- **No Redis caching layer.** The ranking / recommendation / dashboard queries are sub-millisecond at the seed scale, but a production deployment with thousands of jobs would benefit from caching them.
+- **HR self-signup is enabled by default for the demo** (`ALLOW_HR_SELF_REGISTER=true` in `.env.example`). Production should flip this to `false` and provision HR via an admin/invite flow — the backend already enforces the gate either way.
+- **Skills as a comma-separated text field** rather than a pill-style tag input. The data shape is the same (a string array on the wire), but the UX is simpler.
+- **No drag-and-drop Kanban** for the pipeline. The stage dropdown moves a candidate just as quickly, keeps the layout responsive on mobile, and avoids a lot of focus-management work that drag-and-drop forces.
