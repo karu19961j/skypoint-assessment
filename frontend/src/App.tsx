@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AuthProvider, useAuth } from "@/auth/AuthContext";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Layout } from "@/components/Layout";
 import { LoginPage } from "@/pages/Login";
 import { RegisterPage } from "@/pages/Register";
@@ -25,7 +26,17 @@ function HomeRedirect() {
 
 export function App() {
   return (
-    <AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </ErrorBoundary>
+  );
+}
+
+function AppRoutes() {
+  return (
+    <>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
@@ -55,6 +66,6 @@ export function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </AuthProvider>
+    </>
   );
 }

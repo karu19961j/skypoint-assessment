@@ -88,6 +88,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, []);
 
+  // Cross-tab sync — log out / log in in tab A should propagate to tab B
+  // without a page refresh. The `storage` event fires only in OTHER tabs
+  // (not the originating one), so we react by re-reading the token and
+  // syncing the user state.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onStorage = async (e: StorageEvent) => {
+      // jobportal.token is the key used by api/client.ts setToken().
+      if (e.key !== "jobportal.token") return;
+      const token = getToken();
+      if (!token) {
+        // Logout happened in the other tab.
+        setUser(null);
+        return;
+      }
+      // Login (or token refresh) happened elsewhere — re-fetch /me.
+      try {
+        const me = await authApi.me();
+        setUser(me);
+      } catch {
+        setUser(null);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const value = useMemo(
     () => ({ user, loading, login, register, logout }),
     [user, loading, login, register, logout],
