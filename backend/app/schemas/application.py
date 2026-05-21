@@ -57,6 +57,9 @@ class ApplicationOut(BaseModel):
 class ApplicationDetail(ApplicationOut):
     job: JobMini | None = None
     candidate: CandidateMini | None = None
+    # Frontend reads this off the application to filter the stage <select>
+    # so HR can't pick an illegal transition. Empty list = terminal stage.
+    allowed_next_stages: list[ApplicationStage] = []
 
 
 class ApplicationNoteCreate(BaseModel):

@@ -40,11 +40,13 @@ from app.schemas.application import (
 from app.sorts import MyApplicationSort
 
 from ._helpers import (
+    STAGE_TRANSITIONS,
     detail,
     ensure_can_view_application,
     ensure_candidate_owns_application,
     ensure_hr_owns_application,
     get_application_or_404,
+    is_allowed_transition,
     transition_stage,
 )
 
@@ -185,15 +187,6 @@ def get_application_detail(
     return detail(app, include_identity=True)
 
 
-# Allowed stage transitions. The candidate moves to "applied" on submit;
-# every other transition is an HR action. We allow HR to move between any
-# non-terminal stages (forward or backward — interview can drop back to
-# screening for a re-evaluation, etc.) but treat "hired" and "rejected" as
-# terminal: once there, no further transitions. This matches a typical
-# ATS workflow and stops a bug like "withdraw then bump back to interview".
-_TERMINAL_STAGES = {ApplicationStage.hired, ApplicationStage.rejected}
-
-
 @router.patch("/{application_id}/stage", response_model=ApplicationDetail)
 def update_stage(
     application_id: int,
@@ -203,10 +196,19 @@ def update_stage(
 ) -> ApplicationDetail:
     app = get_application_or_404(db, application_id)
     ensure_hr_owns_application(app, current_user)
-    if app.stage in _TERMINAL_STAGES and payload.stage != app.stage:
+    if not is_allowed_transition(app.stage, payload.stage):
+        # Surface both the bad transition AND the valid options so the
+        # frontend (and curl-via-docs caller) can recover without guessing.
+        allowed = sorted(s.value for s in STAGE_TRANSITIONS[app.stage])
+        allowed_msg = (
+            ", ".join(allowed) if allowed else "(none — stage is terminal)"
+        )
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot transition out of terminal stage '{app.stage.value}'.",
+            detail=(
+                f"Cannot transition from '{app.stage.value}' to "
+                f"'{payload.stage.value}'. Allowed next stages: {allowed_msg}."
+            ),
         )
     transition_stage(db, app, payload.stage, by_user=current_user)
     return detail(app)

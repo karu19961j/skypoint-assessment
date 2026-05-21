@@ -133,6 +133,50 @@ def test_cannot_apply_after_deadline(
     assert "deadline" in resp.json()["detail"].lower()
 
 
+def test_disallowed_stage_skip_rejected(
+    client: TestClient, hr_headers: dict, candidate_headers: dict
+) -> None:
+    """The transitions map blocks skipping straight from Applied to Offer —
+    the frontend's filtered dropdown would never offer it, but a curl
+    caller hits the backend guard with a clear error message."""
+    job_id = _create_job(client, hr_headers)
+    app = client.post(
+        "/api/applications/",
+        json=sample_application_payload(job_id),
+        headers=candidate_headers,
+    ).json()
+
+    resp = client.patch(
+        f"/api/applications/{app['id']}/stage",
+        json={"stage": "offer"},
+        headers=hr_headers,
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"].lower()
+    assert "applied" in detail and "offer" in detail
+    # The error tells the caller what IS allowed (Applied → Screening or Rejected).
+    assert "screening" in detail
+
+
+def test_application_detail_lists_allowed_next_stages(
+    client: TestClient, hr_headers: dict, candidate_headers: dict
+) -> None:
+    job_id = _create_job(client, hr_headers)
+    app = client.post(
+        "/api/applications/",
+        json=sample_application_payload(job_id),
+        headers=candidate_headers,
+    ).json()
+    resp = client.patch(
+        f"/api/applications/{app['id']}/stage",
+        json={"stage": "screening"},
+        headers=hr_headers,
+    )
+    body = resp.json()
+    # Screening can step back to Applied, forward to Interview, or Rejected.
+    assert set(body["allowed_next_stages"]) == {"applied", "interview", "rejected"}
+
+
 def test_cannot_transition_out_of_terminal_stage(
     client: TestClient, hr_headers: dict, candidate_headers: dict
 ) -> None:

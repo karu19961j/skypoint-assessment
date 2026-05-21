@@ -5,7 +5,6 @@ import type {
   ApplicationStage,
   ScoreBreakdown,
 } from "@/api/types";
-import { APPLICATION_STAGES } from "@/api/types";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { StageBadge } from "@/components/StageBadge";
 import { formatCtc, formatRelative, stageLabel } from "@/lib/format";
@@ -116,15 +115,20 @@ export function ApplicantsTable({
                 <td className="px-3 py-2">
                   <div className="flex flex-col gap-1">
                     <StageBadge stage={a.stage} />
+                    {/* Dropdown shows the current stage + ONLY the
+                        backend-authorised next stages. Terminal stages
+                        (hired / rejected) disable the select. */}
                     <select
                       className="input py-0.5 text-xs"
                       value={a.stage}
                       onChange={(e) =>
                         onStageChange(a.id, e.target.value as ApplicationStage)
                       }
+                      disabled={a.allowed_next_stages.length === 0}
                       aria-label={`Change stage for applicant ${a.id}`}
                     >
-                      {APPLICATION_STAGES.map((s) => (
+                      <option value={a.stage}>{stageLabel(a.stage)}</option>
+                      {a.allowed_next_stages.map((s) => (
                         <option key={s} value={s}>{stageLabel(s)}</option>
                       ))}
                     </select>

@@ -31,6 +31,57 @@ from app.schemas.application import (
 from app.sorts import ApplicantSort
 
 
+# ---------- stage transition map ----------
+#
+# The pipeline is mostly forward but HR sometimes needs to step a candidate
+# back one stage for a re-evaluation. Anything → rejected is always legal.
+# Hired / rejected are terminal — no transitions out. The frontend reads
+# `allowed_next_stages` off ApplicationDetail to filter the dropdown so an
+# HR literally can't see an illegal option.
+STAGE_TRANSITIONS: dict[ApplicationStage, frozenset[ApplicationStage]] = {
+    ApplicationStage.applied: frozenset(
+        {ApplicationStage.screening, ApplicationStage.rejected}
+    ),
+    ApplicationStage.screening: frozenset(
+        {
+            ApplicationStage.applied,
+            ApplicationStage.interview,
+            ApplicationStage.rejected,
+        }
+    ),
+    ApplicationStage.interview: frozenset(
+        {
+            ApplicationStage.screening,
+            ApplicationStage.offer,
+            ApplicationStage.rejected,
+        }
+    ),
+    ApplicationStage.offer: frozenset(
+        {
+            ApplicationStage.interview,
+            ApplicationStage.hired,
+            ApplicationStage.rejected,
+        }
+    ),
+    ApplicationStage.hired: frozenset(),
+    ApplicationStage.rejected: frozenset(),
+}
+
+
+def allowed_next_stages(current: ApplicationStage) -> list[ApplicationStage]:
+    """Return the stages `current` is allowed to transition into (sorted)."""
+    return sorted(STAGE_TRANSITIONS[current], key=lambda s: s.value)
+
+
+def is_allowed_transition(
+    current: ApplicationStage, target: ApplicationStage
+) -> bool:
+    """No-op transitions (current == target) are allowed but produce no event."""
+    if target == current:
+        return True
+    return target in STAGE_TRANSITIONS[current]
+
+
 # ---------- detail builder ----------
 
 
@@ -57,6 +108,7 @@ def detail(application: Application, *, include_identity: bool = False) -> Appli
             if include_identity and application.candidate
             else None
         ),
+        allowed_next_stages=allowed_next_stages(application.stage),
     )
 
 

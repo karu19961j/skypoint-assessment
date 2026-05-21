@@ -88,6 +88,9 @@ export interface Application {
   updated_at: string;
   job?: JobMini | null;
   candidate?: CandidateMini | null;
+  /** Stages this application is allowed to transition into next.
+   *  Backend-authoritative; the HR stage dropdown filters on this. */
+  allowed_next_stages: ApplicationStage[];
 }
 
 export interface ApplicationCreate {
