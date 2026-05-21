@@ -1,15 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { ApiError, downloadFile } from "@/api/client";
 import { applicationsApi, jobsApi } from "@/api/endpoints";
-import type {
-  Application,
-  ApplicationStage,
-  Job,
-  RankedApplication,
-  ScoreBreakdown,
-} from "@/api/types";
+import type { Application, Job } from "@/api/types";
 import { ApplicantFilterSidebar } from "@/components/applicants/FilterSidebar";
 import { ApplicantsTable } from "@/components/applicants/ApplicantsTable";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -19,6 +13,7 @@ import {
   EMPTY_APPLICANT_FILTERS,
   type ApplicantFilterForm,
 } from "@/lib/applicantFilters";
+import { useApplicants } from "@/lib/useApplicants";
 
 export function HrJobApplicantsPage() {
   const { id } = useParams<{ id: string }>();
@@ -26,16 +21,11 @@ export function HrJobApplicantsPage() {
 
   const [job, setJob] = useState<Job | null>(null);
   const [filters, setFilters] = useState<ApplicantFilterForm>(EMPTY_APPLICANT_FILTERS);
-  const [applicants, setApplicants] = useState<Application[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [notesFor, setNotesFor] = useState<Application | null>(null);
   // Ranked mode swaps the listing endpoint and decorates each row with
   // its score badge + matched-skill highlights. Filters are bypassed in
   // ranked mode (the spec wants the full set scored).
   const [ranked, setRanked] = useState(false);
-  const [scoreByAppId, setScoreByAppId] = useState<Map<number, ScoreBreakdown>>(
-    () => new Map(),
-  );
 
   const apiFilters = useMemo(() => applicantFiltersToApi(filters), [filters]);
 
@@ -44,47 +34,22 @@ export function HrJobApplicantsPage() {
     jobsApi
       .get(jobId)
       .then(setJob)
-      .catch((err) =>
-        setError(err instanceof ApiError ? err.detail : "Failed to load job"),
-      );
+      .catch(() => undefined);
   }, [jobId]);
 
-  const refresh = () => {
-    if (!jobId) return;
-    setError(null);
-    if (ranked) {
-      applicationsApi
-        .ranked(jobId)
-        .then((rows: RankedApplication[]) => {
-          setApplicants(rows);
-          setScoreByAppId(new Map(rows.map((r) => [r.id, r.score])));
-        })
-        .catch((err) =>
-          setError(err instanceof ApiError ? err.detail : "Failed to load ranking"),
-        );
-    } else {
-      applicationsApi
-        .byJob(jobId, apiFilters)
-        .then(setApplicants)
-        .catch((err) =>
-          setError(err instanceof ApiError ? err.detail : "Failed to load applicants"),
-        );
-    }
-  };
+  // The hook owns the fetch + state + setStage; the page just decides
+  // which fetcher to use based on ranked mode.
+  const fetcher = useCallback(() => {
+    if (!jobId) return Promise.resolve([]);
+    return ranked
+      ? applicationsApi.ranked(jobId)
+      : applicationsApi.byJob(jobId, apiFilters);
+  }, [jobId, ranked, apiFilters]);
 
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId, apiFilters, ranked]);
-
-  const setStage = async (appId: number, stage: ApplicationStage) => {
-    try {
-      await applicationsApi.setStage(appId, stage);
-      refresh();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not update stage");
-    }
-  };
+  const { applicants, scoreByAppId, error, setStage, setError } = useApplicants({
+    fetcher,
+    deps: [fetcher],
+  });
 
   const onExport = () =>
     downloadFile(

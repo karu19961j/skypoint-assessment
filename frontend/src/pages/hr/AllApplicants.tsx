@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { ApiError } from "@/api/client";
 import { applicationsApi, jobsApi } from "@/api/endpoints";
 import type { Application, ApplicationStage, Job } from "@/api/types";
 import { APPLICATION_STAGES } from "@/api/types";
@@ -14,6 +13,7 @@ import {
   EMPTY_APPLICANT_FILTERS,
   type ApplicantFilterForm,
 } from "@/lib/applicantFilters";
+import { useApplicants } from "@/lib/useApplicants";
 
 interface FilterForm extends ApplicantFilterForm {
   job_id: string;
@@ -24,8 +24,6 @@ const EMPTY: FilterForm = { ...EMPTY_APPLICANT_FILTERS, job_id: "" };
 export function HrAllApplicantsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [filters, setFilters] = useState<FilterForm>(EMPTY);
-  const [applicants, setApplicants] = useState<Application[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [notesFor, setNotesFor] = useState<Application | null>(null);
   const apiFilters = useMemo(() => crossJobFiltersToApi(filters), [filters]);
 
@@ -36,33 +34,14 @@ export function HrAllApplicantsPage() {
       .catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    setError(null);
-    applicationsApi
-      .all(apiFilters)
-      .then((rows) => {
-        if (!cancelled) setApplicants(rows);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof ApiError ? err.detail : "Failed to load applicants");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [apiFilters]);
-
-  const setStage = async (appId: number, stage: ApplicationStage) => {
-    try {
-      const updated = await applicationsApi.setStage(appId, stage);
-      setApplicants((prev) =>
-        prev.map((a) => (a.id === appId ? { ...a, ...updated } : a)),
-      );
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not update stage");
-    }
-  };
+  const fetcher = useCallback(
+    () => applicationsApi.all(apiFilters),
+    [apiFilters],
+  );
+  const { applicants, error, setStage } = useApplicants({
+    fetcher,
+    deps: [fetcher],
+  });
 
   const totals = useMemo(() => {
     const byStage: Record<ApplicationStage, number> = {
