@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { Toaster } from "sonner";
 
 import { AuthProvider } from "@/auth/AuthContext";
 import { useAuth } from "@/auth/useAuth";
@@ -30,6 +31,11 @@ export function App() {
     <ErrorBoundary>
       <AuthProvider>
         <AppRoutes />
+        {/* Sonner sits at the document root, outside route content, so
+            toasts persist across navigation and live above the app's
+            stacked layouts (drawer, modals). `richColors` honors the
+            success/error/info palette we already use elsewhere. */}
+        <Toaster position="top-right" richColors closeButton />
       </AuthProvider>
     </ErrorBoundary>
   );
