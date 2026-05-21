@@ -196,6 +196,10 @@ export const profileApi = {
   remove() {
     return apiFetch<void>("/profile/", { method: "DELETE" });
   },
+  /** Path of the candidate's own profile-resume stream. Fetched
+   *  authenticated; the helper turns the blob into an object URL so a
+   *  PDF opens inline in a new tab. */
+  resumePath: "/profile/resume",
 };
 
 export const bookmarksApi = {

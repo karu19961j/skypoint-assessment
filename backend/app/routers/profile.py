@@ -6,11 +6,15 @@ notice, preferred locations, prior work, education, the resume itself)
 so applying to a job is just one click + an optional cover note.
 """
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
+
+logger = logging.getLogger(__name__)
 
 from app.deps import DbSession, require_role
 from app.models import (
@@ -173,6 +177,51 @@ def upsert_profile(
     db.commit()
     db.refresh(profile)
     return _profile_to_out(profile)
+
+
+@router.get("/resume")
+def get_own_resume(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_role(UserRole.candidate))],
+) -> StreamingResponse:
+    """Stream the candidate's own profile resume back.
+
+    Owner-implicit (we use current_user.id, no resource path). `Content-
+    Disposition: inline` so browsers preview PDFs in a new tab instead
+    of forcing a download — the candidate is checking what they uploaded,
+    not saving it. DOCX falls back to the browser's default handler.
+    """
+    profile = db.scalar(
+        select(CandidateProfile).where(CandidateProfile.user_id == current_user.id)
+    )
+    if profile is None or not profile.resume_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No resume on file.",
+        )
+
+    storage = get_storage()
+    stored = storage.head_object(profile.resume_key)
+    if stored is None:
+        logger.error(
+            "Resume key %r referenced by profile %s is missing from storage.",
+            profile.resume_key,
+            profile.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume file is no longer available.",
+        )
+
+    filename = stored.filename or profile.resume_filename or "resume"
+    return StreamingResponse(
+        storage.iter_object(profile.resume_key),
+        media_type=stored.content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Length": str(stored.size),
+        },
+    )
 
 
 @router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
