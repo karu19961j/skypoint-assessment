@@ -165,14 +165,21 @@ export function CandidateJobDetailPage() {
       {showForm && !applied ? (
         <form onSubmit={onApply} className="card space-y-4" noValidate>
           <h2 className="text-lg font-semibold">Apply to {job.title}</h2>
+          <p className="text-xs text-slate-500">
+            Fields marked <span className="text-rose-600">*</span> are required.
+          </p>
           <ErrorBanner message={error} />
 
           <div>
-            <label className="label" htmlFor="apply-resume">Resume link</label>
+            <label className="label" htmlFor="apply-resume">
+              Resume link <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="apply-resume"
               className="input"
               placeholder="https://…"
+              aria-required="true"
               aria-invalid={errors.resume_link ? "true" : undefined}
               aria-describedby={errors.resume_link ? "apply-resume-error" : undefined}
               {...register("resume_link")}
@@ -201,44 +208,60 @@ export function CandidateJobDetailPage() {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="label" htmlFor="apply-yoe">Years of experience</label>
+              <label className="label" htmlFor="apply-yoe">
+                Years of experience <span aria-hidden="true" className="text-rose-600">*</span>
+                <span className="sr-only"> (required)</span>
+              </label>
               <input
                 id="apply-yoe"
                 className="input"
                 type="number"
                 min={0}
+                aria-required="true"
                 aria-invalid={errors.years_experience ? "true" : undefined}
                 {...register("years_experience")}
               />
             </div>
             <div>
-              <label className="label" htmlFor="apply-notice">Notice period (days)</label>
+              <label className="label" htmlFor="apply-notice">
+                Notice period (days) <span aria-hidden="true" className="text-rose-600">*</span>
+                <span className="sr-only"> (required)</span>
+              </label>
               <input
                 id="apply-notice"
                 className="input"
                 type="number"
                 min={0}
+                aria-required="true"
                 aria-invalid={errors.notice_period_days ? "true" : undefined}
                 {...register("notice_period_days")}
               />
             </div>
             <div>
-              <label className="label" htmlFor="apply-current-ctc">Current CTC (₹)</label>
+              <label className="label" htmlFor="apply-current-ctc">
+                Current CTC (₹) <span aria-hidden="true" className="text-rose-600">*</span>
+                <span className="sr-only"> (required)</span>
+              </label>
               <input
                 id="apply-current-ctc"
                 className="input"
                 type="number"
                 min={0}
+                aria-required="true"
                 {...register("current_ctc")}
               />
             </div>
             <div>
-              <label className="label" htmlFor="apply-expected-ctc">Expected CTC (₹)</label>
+              <label className="label" htmlFor="apply-expected-ctc">
+                Expected CTC (₹) <span aria-hidden="true" className="text-rose-600">*</span>
+                <span className="sr-only"> (required)</span>
+              </label>
               <input
                 id="apply-expected-ctc"
                 className="input"
                 type="number"
                 min={0}
+                aria-required="true"
                 {...register("expected_ctc")}
               />
             </div>

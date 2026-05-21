@@ -43,17 +43,24 @@ export function LoginPage() {
     <div className="mx-auto mt-12 max-w-md">
       <div className="card">
         <h1 className="mb-1 text-xl font-semibold">Welcome back</h1>
-        <p className="mb-4 text-sm text-slate-500">Log in to manage jobs or applications.</p>
+        <p className="mb-1 text-sm text-slate-500">Log in to manage jobs or applications.</p>
+        <p className="mb-4 text-xs text-slate-500">
+          Fields marked <span className="text-rose-600">*</span> are required.
+        </p>
 
         <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <ErrorBanner message={error} />
           <div>
-            <label className="label" htmlFor="login-email">Email</label>
+            <label className="label" htmlFor="login-email">
+              Email <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="login-email"
               type="email"
               autoComplete="email"
               className="input"
+              aria-required="true"
               aria-invalid={errors.email ? "true" : undefined}
               aria-describedby={errors.email ? "login-email-error" : undefined}
               {...register("email")}
@@ -65,12 +72,16 @@ export function LoginPage() {
             )}
           </div>
           <div>
-            <label className="label" htmlFor="login-password">Password</label>
+            <label className="label" htmlFor="login-password">
+              Password <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="login-password"
               type="password"
               autoComplete="current-password"
               className="input"
+              aria-required="true"
               aria-invalid={errors.password ? "true" : undefined}
               aria-describedby={errors.password ? "login-password-error" : undefined}
               {...register("password")}

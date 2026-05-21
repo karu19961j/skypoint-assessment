@@ -115,15 +115,22 @@ export function HrJobFormPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <h1 className="text-2xl font-semibold">{editingId ? "Edit job" : "Post a new job"}</h1>
+      <p className="text-xs text-slate-500">
+        Fields marked <span className="text-rose-600">*</span> are required.
+      </p>
 
       <form onSubmit={onSubmit} className="card space-y-4" noValidate>
         <ErrorBanner message={error} />
 
         <div>
-          <label className="label" htmlFor="job-title">Title</label>
+          <label className="label" htmlFor="job-title">
+            Title <span aria-hidden="true" className="text-rose-600">*</span>
+            <span className="sr-only"> (required)</span>
+          </label>
           <input
             id="job-title"
             className="input"
+            aria-required="true"
             aria-invalid={errors.title ? "true" : undefined}
             aria-describedby={errors.title ? "job-title-error" : undefined}
             {...register("title")}
@@ -136,10 +143,14 @@ export function HrJobFormPage() {
         </div>
 
         <div>
-          <label className="label" htmlFor="job-description">Description</label>
+          <label className="label" htmlFor="job-description">
+            Description <span aria-hidden="true" className="text-rose-600">*</span>
+            <span className="sr-only"> (required)</span>
+          </label>
           <textarea
             id="job-description"
             className="input min-h-[150px]"
+            aria-required="true"
             aria-invalid={errors.description ? "true" : undefined}
             aria-describedby={errors.description ? "job-description-error" : undefined}
             {...register("description")}
@@ -153,10 +164,14 @@ export function HrJobFormPage() {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="label" htmlFor="job-department">Department</label>
+            <label className="label" htmlFor="job-department">
+              Department <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="job-department"
               className="input"
+              aria-required="true"
               aria-invalid={errors.department ? "true" : undefined}
               aria-describedby={errors.department ? "job-department-error" : undefined}
               {...register("department")}
@@ -172,16 +187,22 @@ export function HrJobFormPage() {
             <input id="job-deadline" className="input" type="date" {...register("deadline")} />
           </div>
           <div>
-            <label className="label" htmlFor="job-location">Location</label>
-            <select id="job-location" className="input" {...register("location_type")}>
+            <label className="label" htmlFor="job-location">
+              Location <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
+            <select id="job-location" className="input" aria-required="true" {...register("location_type")}>
               <option value="remote">Remote</option>
               <option value="hybrid">Hybrid</option>
               <option value="onsite">On-site</option>
             </select>
           </div>
           <div>
-            <label className="label" htmlFor="job-employment">Employment type</label>
-            <select id="job-employment" className="input" {...register("employment_type")}>
+            <label className="label" htmlFor="job-employment">
+              Employment type <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
+            <select id="job-employment" className="input" aria-required="true" {...register("employment_type")}>
               <option value="full_time">Full-time</option>
               <option value="part_time">Part-time</option>
               <option value="contract">Contract</option>
@@ -192,16 +213,23 @@ export function HrJobFormPage() {
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="label" htmlFor="job-exp-min">Min exp (yrs)</label>
-            <input id="job-exp-min" className="input" type="number" min={0} {...register("exp_min")} />
+            <label className="label" htmlFor="job-exp-min">
+              Min exp (yrs) <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
+            <input id="job-exp-min" className="input" type="number" min={0} aria-required="true" {...register("exp_min")} />
           </div>
           <div>
-            <label className="label" htmlFor="job-exp-max">Max exp</label>
+            <label className="label" htmlFor="job-exp-max">
+              Max exp <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="job-exp-max"
               className="input"
               type="number"
               min={0}
+              aria-required="true"
               aria-invalid={errors.exp_max ? "true" : undefined}
               aria-describedby={errors.exp_max ? "job-exp-max-error" : undefined}
               {...register("exp_max")}
@@ -213,16 +241,23 @@ export function HrJobFormPage() {
             )}
           </div>
           <div>
-            <label className="label" htmlFor="job-ctc-min">Min CTC (₹)</label>
-            <input id="job-ctc-min" className="input" type="number" min={0} {...register("ctc_min")} />
+            <label className="label" htmlFor="job-ctc-min">
+              Min CTC (₹) <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
+            <input id="job-ctc-min" className="input" type="number" min={0} aria-required="true" {...register("ctc_min")} />
           </div>
           <div>
-            <label className="label" htmlFor="job-ctc-max">Max CTC (₹)</label>
+            <label className="label" htmlFor="job-ctc-max">
+              Max CTC (₹) <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="job-ctc-max"
               className="input"
               type="number"
               min={0}
+              aria-required="true"
               aria-invalid={errors.ctc_max ? "true" : undefined}
               aria-describedby={errors.ctc_max ? "job-ctc-max-error" : undefined}
               {...register("ctc_max")}
