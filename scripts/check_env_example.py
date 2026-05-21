@@ -52,7 +52,16 @@ def keys_in_settings() -> set[str]:
 
 
 def keys_referenced_in_compose(path: Path) -> set[str]:
-    text = path.read_text()
+    # Strip YAML comments before regexing — docs sometimes show
+    # `${VAR:?msg}` as a syntax placeholder in a comment, and we don't
+    # want the audit to flag that as a real env reference. The compose
+    # file has no `#` inside quoted strings today, so a naïve split is
+    # safe; revisit if that ever changes.
+    lines = []
+    for raw in path.read_text().splitlines():
+        idx = raw.find("#")
+        lines.append(raw if idx < 0 else raw[:idx])
+    text = "\n".join(lines)
     # Matches ${VAR}, ${VAR:?...}, ${VAR:-...}, ${VAR-...}
     return set(re.findall(r"\$\{([A-Z_][A-Z0-9_]*)", text))
 
