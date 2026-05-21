@@ -14,6 +14,10 @@ PLACEHOLDER_JWT_SECRETS: frozenset[str] = frozenset(
         "change-me-to-a-long-random-string-for-prod",
         "change-me",
         "secret",
+        "placeholder",
+        "todo",
+        "dev",
+        "test",
         "",
     }
 )

@@ -25,7 +25,7 @@ app.add_middleware(
     # the CSRF-shaped footgun a future cookie-based session would inherit.
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])

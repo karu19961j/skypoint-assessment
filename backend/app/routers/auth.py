@@ -22,7 +22,7 @@ def register(payload: RegisterIn, db: DbSession) -> TokenOut:
             detail="HR accounts are provisioned by administrators, not via self-signup.",
         )
 
-    existing = db.scalar(select(User).where(User.email == payload.email.lower()))
+    existing = db.scalar(select(User).where(User.email == payload.email))
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -30,7 +30,7 @@ def register(payload: RegisterIn, db: DbSession) -> TokenOut:
         )
 
     user = User(
-        email=payload.email.lower(),
+        email=payload.email,  # already lowercased by the LoginIn/RegisterIn validator
         password_hash=hash_password(payload.password),
         full_name=payload.full_name.strip(),
         role=payload.role,
@@ -39,19 +39,19 @@ def register(payload: RegisterIn, db: DbSession) -> TokenOut:
     db.commit()
     db.refresh(user)
 
-    token = create_access_token(subject=str(user.id), role=user.role.value)
+    token = create_access_token(subject=user.id, role=user.role.value)
     return TokenOut(access_token=token, user=UserOut.model_validate(user))
 
 
 @router.post("/login", response_model=TokenOut)
 def login(payload: LoginIn, db: DbSession) -> TokenOut:
-    user = db.scalar(select(User).where(User.email == payload.email.lower()))
+    user = db.scalar(select(User).where(User.email == payload.email))
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password."
         )
 
-    token = create_access_token(subject=str(user.id), role=user.role.value)
+    token = create_access_token(subject=user.id, role=user.role.value)
     return TokenOut(access_token=token, user=UserOut.model_validate(user))
 
 
