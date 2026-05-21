@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { ApiError, downloadFile } from "@/api/client";
@@ -10,6 +10,7 @@ import { ApplicantFilterSidebar } from "@/components/applicants/FilterSidebar";
 import { ApplicantsTable } from "@/components/applicants/ApplicantsTable";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NotesDrawer } from "@/components/NotesDrawer";
+import { Pagination } from "@/components/Pagination";
 import {
   applicantFiltersToApi,
   EMPTY_APPLICANT_FILTERS,
@@ -17,6 +18,8 @@ import {
 } from "@/lib/applicantFilters";
 import { notifyError } from "@/lib/toast";
 import { useApplicants } from "@/lib/useApplicants";
+
+const PAGE_SIZE = 25;
 
 export function HrJobApplicantsPage() {
   const { id } = useParams<{ id: string }>();
@@ -28,8 +31,19 @@ export function HrJobApplicantsPage() {
   // its score badge + matched-skill highlights. Filters are bypassed in
   // ranked mode (the spec wants the full set scored).
   const [ranked, setRanked] = useState(false);
+  const [page, setPage] = useState(1);
 
   const apiFilters = useMemo(() => applicantFiltersToApi(filters), [filters]);
+  const paginatedFilters = useMemo(
+    () => ({ ...apiFilters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    [apiFilters, page],
+  );
+
+  // Any filter / mode change resets to page 1 so the user doesn't end up
+  // looking at an empty page 7 of a filter set that only has 1 page.
+  useEffect(() => {
+    setPage(1);
+  }, [apiFilters, ranked]);
 
   const jobQuery = useQuery({
     queryKey: queryKeys.jobs.detail(jobId),
@@ -39,14 +53,25 @@ export function HrJobApplicantsPage() {
 
   const queryKey = ranked
     ? queryKeys.applications.ranked(jobId)
-    : queryKeys.applications.byJob(jobId, apiFilters);
+    : queryKeys.applications.byJob(jobId, paginatedFilters);
 
-  const { applicants, scoreByAppId, error, setStage, setError } = useApplicants({
+  const { applicants, total, scoreByAppId, error, setStage, setError } = useApplicants({
     queryKey,
     fetcher: jobId
       ? ranked
-        ? () => applicationsApi.ranked(jobId)
-        : () => applicationsApi.byJob(jobId, apiFilters)
+        ? // Ranked endpoint doesn't paginate (it scores the full set).
+          // Wrap the response so the hook's `{items, total}` contract holds.
+          async () => {
+            const items = await applicationsApi.ranked(jobId);
+            return { items, total: items.length };
+          }
+        : async () => {
+            const { items, total } = await applicationsApi.byJobWithCount(
+              jobId,
+              paginatedFilters,
+            );
+            return { items, total: total ?? items.length };
+          }
       : null,
   });
 
@@ -103,7 +128,7 @@ export function HrJobApplicantsPage() {
         </div>
 
         <div className="sr-only" role="status" aria-live="polite">
-          {`Showing ${applicants.length} ${applicants.length === 1 ? "applicant" : "applicants"}`}
+          {`Showing ${applicants.length} of ${total} ${total === 1 ? "applicant" : "applicants"}`}
         </div>
 
         <ErrorBanner message={error} />
@@ -118,6 +143,16 @@ export function HrJobApplicantsPage() {
             onProfileOpen={setNotesFor}
           />
         )}
+
+        {!ranked ? (
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            onChange={setPage}
+            itemLabel="applicants"
+          />
+        ) : null}
       </section>
 
       {notesFor ? (

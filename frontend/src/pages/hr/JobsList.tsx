@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { jobsApi } from "@/api/endpoints";
 import { queryKeys } from "@/api/queryKeys";
 import type { JobStatus } from "@/api/types";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { Pagination } from "@/components/Pagination";
 import {
   employmentLabel,
   formatCtcRange,
@@ -19,21 +21,33 @@ const STATUS_COLOR: Record<JobStatus, string> = {
   closed: "bg-slate-200 text-slate-700",
 };
 
-const MINE_FILTER = { mine: true };
+const PAGE_SIZE = 10;
 
 export function HrJobsListPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [page, setPage] = useState(1);
 
-  const { data: jobs = [], error, isLoading } = useQuery({
-    queryKey: queryKeys.jobs.list(MINE_FILTER),
-    queryFn: () => jobsApi.list(MINE_FILTER),
+  const listFilters = {
+    mine: true,
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+  };
+
+  const { data, error, isLoading } = useQuery({
+    queryKey: queryKeys.jobs.list(listFilters),
+    queryFn: () => jobsApi.listWithCount(listFilters),
   });
+  const jobs = data?.items ?? [];
+  const total = data?.total ?? 0;
 
   // After any mutation that changes a job, blow away every cached jobs
   // query (lists + details + recommended) so the dashboard / browse /
   // detail pages all reflect the change. React Query's prefix-match
   // makes `["jobs"]` invalidate every nested ["jobs", …] entry.
+  // Broad prefix sweep: mutations change any of (lists, details,
+  // recommended), so we invalidate the whole `["jobs"]` namespace and
+  // let React Query refetch whichever ones are currently mounted.
   const invalidateJobs = () =>
     queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all() });
 
@@ -104,7 +118,9 @@ export function HrJobsListPage() {
       {isLoading ? (
         <div className="card text-slate-500">Loading…</div>
       ) : jobs.length === 0 ? (
-        <div className="card text-slate-500">No jobs yet. Create your first posting.</div>
+        <div className="card text-slate-500">
+          {total === 0 ? "No jobs yet. Create your first posting." : "No jobs on this page."}
+        </div>
       ) : (
         jobs.map((j) => (
           <div key={j.id} className="card">
@@ -173,6 +189,14 @@ export function HrJobsListPage() {
           </div>
         ))
       )}
+
+      <Pagination
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        onChange={setPage}
+        itemLabel="jobs"
+      />
     </div>
   );
 }

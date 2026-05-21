@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { applicationsApi, jobsApi } from "@/api/endpoints";
 import { queryKeys } from "@/api/queryKeys";
@@ -9,6 +9,7 @@ import { ApplicantFilterSidebar } from "@/components/applicants/FilterSidebar";
 import { ApplicantsTable } from "@/components/applicants/ApplicantsTable";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NotesDrawer } from "@/components/NotesDrawer";
+import { Pagination } from "@/components/Pagination";
 import { stageLabel } from "@/lib/format";
 import {
   crossJobFiltersToApi,
@@ -23,11 +24,23 @@ interface FilterForm extends ApplicantFilterForm {
 
 const EMPTY: FilterForm = { ...EMPTY_APPLICANT_FILTERS, job_id: "" };
 const MINE = { mine: true };
+const PAGE_SIZE = 25;
 
 export function HrAllApplicantsPage() {
   const [filters, setFilters] = useState<FilterForm>(EMPTY);
   const [notesFor, setNotesFor] = useState<Application | null>(null);
+  const [page, setPage] = useState(1);
+
   const apiFilters = useMemo(() => crossJobFiltersToApi(filters), [filters]);
+  const paginatedFilters = useMemo(
+    () => ({ ...apiFilters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    [apiFilters, page],
+  );
+
+  // Reset to page 1 on filter change.
+  useEffect(() => {
+    setPage(1);
+  }, [apiFilters]);
 
   const jobsQuery = useQuery({
     queryKey: queryKeys.jobs.list(MINE),
@@ -35,12 +48,19 @@ export function HrAllApplicantsPage() {
   });
   const jobs = jobsQuery.data ?? [];
 
-  const { applicants, error, setStage } = useApplicants({
-    queryKey: queryKeys.applications.crossJob(apiFilters),
-    fetcher: () => applicationsApi.all(apiFilters),
+  const { applicants, total, error, setStage } = useApplicants({
+    queryKey: queryKeys.applications.crossJob(paginatedFilters),
+    fetcher: async () => {
+      const { items, total: count } =
+        await applicationsApi.allWithCount(paginatedFilters);
+      return { items, total: count ?? items.length };
+    },
   });
 
-  const totals = useMemo(() => {
+  // Per-stage counts shown on the chip cards. Counts here are for the
+  // currently-visible page; full-funnel totals live on the HR dashboard.
+  // (A cheap query for full per-stage counts would be a nice add later.)
+  const stageCountsOnPage = useMemo(() => {
     const byStage: Record<ApplicationStage, number> = {
       applied: 0,
       screening: 0,
@@ -86,8 +106,8 @@ export function HrAllApplicantsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Candidate inbox</h1>
           <p className="text-sm text-slate-500">
-            Every applicant across every job you own — {applicants.length} match
-            {applicants.length === 1 ? "" : "es"} the current filters.
+            Every applicant across every job you own — {total} match
+            {total === 1 ? "" : "es"} the current filters.
           </p>
         </div>
 
@@ -108,8 +128,9 @@ export function HrAllApplicantsPage() {
                 {stageLabel(s)}
               </span>
               <span className="mt-1 text-xl font-semibold text-slate-900">
-                {totals[s]}
+                {stageCountsOnPage[s]}
               </span>
+              <span className="text-[10px] text-slate-400">on this page</span>
             </button>
           ))}
         </div>
@@ -117,7 +138,7 @@ export function HrAllApplicantsPage() {
         <ErrorBanner message={error} />
 
         <div className="sr-only" role="status" aria-live="polite">
-          {`Showing ${applicants.length} ${applicants.length === 1 ? "applicant" : "applicants"}`}
+          {`Showing ${applicants.length} of ${total} ${total === 1 ? "applicant" : "applicants"}`}
         </div>
 
         {applicants.length === 0 ? (
@@ -132,6 +153,14 @@ export function HrAllApplicantsPage() {
             onProfileOpen={setNotesFor}
           />
         )}
+
+        <Pagination
+          page={page}
+          pageSize={PAGE_SIZE}
+          total={total}
+          onChange={setPage}
+          itemLabel="applicants"
+        />
       </section>
 
       {notesFor ? (
