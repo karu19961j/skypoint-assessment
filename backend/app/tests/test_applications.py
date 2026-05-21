@@ -111,6 +111,57 @@ def test_cannot_apply_to_inactive_job(
     assert resp.status_code == 400
 
 
+def test_cannot_apply_after_deadline(
+    client: TestClient, hr_headers: dict, candidate_headers: dict
+) -> None:
+    from datetime import date, timedelta
+
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    resp = client.post(
+        "/api/jobs/",
+        json=sample_job_payload(deadline=yesterday),
+        headers=hr_headers,
+    )
+    job_id = resp.json()["id"]
+
+    resp = client.post(
+        "/api/applications/",
+        json=sample_application_payload(job_id),
+        headers=candidate_headers,
+    )
+    assert resp.status_code == 400
+    assert "deadline" in resp.json()["detail"].lower()
+
+
+def test_cannot_transition_out_of_terminal_stage(
+    client: TestClient, hr_headers: dict, candidate_headers: dict
+) -> None:
+    job_id = _create_job(client, hr_headers)
+    app = client.post(
+        "/api/applications/",
+        json=sample_application_payload(job_id),
+        headers=candidate_headers,
+    ).json()
+
+    # Move through to "hired".
+    for stage in ("screening", "interview", "offer", "hired"):
+        resp = client.patch(
+            f"/api/applications/{app['id']}/stage",
+            json={"stage": stage},
+            headers=hr_headers,
+        )
+        assert resp.status_code == 200
+
+    # Trying to walk it back out of a terminal stage is rejected.
+    resp = client.patch(
+        f"/api/applications/{app['id']}/stage",
+        json={"stage": "interview"},
+        headers=hr_headers,
+    )
+    assert resp.status_code == 400
+    assert "terminal" in resp.json()["detail"].lower()
+
+
 def test_hr_can_only_see_own_jobs_applicants(
     client: TestClient, hr_headers: dict, candidate_headers: dict
 ) -> None:
