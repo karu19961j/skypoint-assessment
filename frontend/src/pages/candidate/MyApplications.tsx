@@ -1,48 +1,43 @@
-import { Fragment, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { ApiError } from "@/api/client";
 import { applicationsApi } from "@/api/endpoints";
-import type { Application, ApplicationStage } from "@/api/types";
+import { queryKeys } from "@/api/queryKeys";
+import type { ApplicationStage } from "@/api/types";
 import { APPLICATION_STAGES } from "@/api/types";
 import { ApplicationTimeline } from "@/components/ApplicationTimeline";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { StageBadge } from "@/components/StageBadge";
 import { formatRelative, stageLabel } from "@/lib/format";
+import { notify, notifyError } from "@/lib/toast";
 
 export function MyApplicationsPage() {
-  const [apps, setApps] = useState<Application[]>([]);
+  const queryClient = useQueryClient();
   const [stage, setStage] = useState<ApplicationStage | "">("");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"recent" | "updated">("recent");
-  const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [loaded, setLoaded] = useState(false);
 
-  const refresh = () => {
-    applicationsApi
-      .mine({ stage: stage || undefined, q: q.trim() || undefined, sort })
-      .then(setApps)
-      .catch((err) => {
-        if (err instanceof ApiError) setError(err.detail);
-      })
-      .finally(() => setLoaded(true));
-  };
+  const filters = { stage: stage || undefined, q: q.trim() || undefined, sort };
 
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, q, sort]);
+  const { data: apps = [], error, isLoading } = useQuery({
+    queryKey: queryKeys.applications.mine(filters),
+    queryFn: () => applicationsApi.mine(filters),
+  });
 
-  const withdraw = async (id: number) => {
-    if (!confirm("Withdraw this application?")) return;
-    try {
-      await applicationsApi.withdraw(id);
-      refresh();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not withdraw");
-    }
-  };
+  const withdrawMutation = useMutation({
+    mutationFn: (id: number) => applicationsApi.withdraw(id),
+    onSuccess: () => {
+      // Invalidate ALL nested `applications` keys so timeline + detail
+      // for the withdrawn row are evicted alongside the list.
+      queryClient.invalidateQueries({ queryKey: queryKeys.applications.all() });
+      notify.success("Application withdrawn.");
+    },
+    onError: (err) => notifyError(err, "Could not withdraw application"),
+  });
+
+  const queryError = error instanceof Error ? error.message : null;
 
   return (
     <div className="space-y-4">
@@ -80,13 +75,15 @@ export function MyApplicationsPage() {
         </select>
       </div>
 
-      <ErrorBanner message={error} />
+      <ErrorBanner message={queryError} />
       <div className="sr-only" role="status" aria-live="polite">
         {`Showing ${apps.length} ${apps.length === 1 ? "application" : "applications"}`}
       </div>
 
-      {apps.length === 0 ? (
-        loaded && !stage && !q ? (
+      {isLoading ? (
+        <div className="card text-slate-500">Loading…</div>
+      ) : apps.length === 0 ? (
+        !stage && !q ? (
           <div className="card flex flex-col items-start gap-3 text-slate-600">
             <p className="text-sm">
               You haven&apos;t applied to anything yet. Pick a role that fits and
@@ -147,8 +144,12 @@ export function MyApplicationsPage() {
                           </button>
                           {a.stage === "applied" ? (
                             <button
-                              onClick={() => withdraw(a.id)}
+                              onClick={() => {
+                                if (!confirm("Withdraw this application?")) return;
+                                withdrawMutation.mutate(a.id);
+                              }}
                               className="text-xs text-rose-600 hover:underline"
+                              disabled={withdrawMutation.isPending}
                             >
                               Withdraw
                             </button>

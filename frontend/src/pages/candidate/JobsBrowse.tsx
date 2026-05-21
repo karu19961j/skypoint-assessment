@@ -1,13 +1,21 @@
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
 import { bookmarksApi, jobsApi, type JobListFilters } from "@/api/endpoints";
+import { queryKeys } from "@/api/queryKeys";
 import type { EmploymentType, Job, LocationType, RecommendedJob } from "@/api/types";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { JobCard } from "@/components/JobCard";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { TagInput } from "@/components/TagInput";
+import { notifyError } from "@/lib/toast";
 
 const PAGE_SIZE = 12;
 
@@ -58,98 +66,105 @@ function buildQuery(f: Filters, offset: number): JobListFilters {
 type Tab = "all" | "recommended";
 
 export function CandidateJobsPage() {
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: Tab = searchParams.get("tab") === "recommended" ? "recommended" : "all";
   const [filters, setFilters] = useState<Filters>(EMPTY);
-  const [jobs, setJobs] = useState<Job[] | RecommendedJob[]>([]);
-  const [nextOffset, setNextOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [bookmarkedIds, setBookmarkedIds] = useState<Set<number>>(new Set());
-  const [error, setError] = useState<string | null>(null);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [noProfile, setNoProfile] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // The fetcher for one batch starting at `offset`. Returns the items to
-  // append + whether there's another batch behind it.
-  const fetchBatch = useCallback(
-    async (offset: number) => {
-      const rows = await jobsApi.list(buildQuery(filters, offset));
+  // ----- All-jobs tab uses infinite scroll -----
+  // React Query's useInfiniteQuery is the canonical idiom: pageParams are
+  // the offsets we've fetched, `getNextPageParam` returns undefined when
+  // the backend says there's no more data. Cache keyed by filters so
+  // tab-switching back to a previous filter set is instant.
+  const jobsInfinite = useInfiniteQuery({
+    queryKey: queryKeys.jobs.list(buildQuery(filters, 0)),
+    enabled: tab === "all",
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      const rows = await jobsApi.list(buildQuery(filters, pageParam));
       return {
         items: rows.slice(0, PAGE_SIZE),
         more: rows.length > PAGE_SIZE,
+        nextOffset: pageParam + Math.min(rows.length, PAGE_SIZE),
       };
     },
-    [filters],
-  );
+    getNextPageParam: (last) => (last.more ? last.nextOffset : undefined),
+  });
 
-  // Reload from scratch whenever filters or the tab change.
-  useEffect(() => {
-    let cancelled = false;
-    setInitialLoading(true);
-    setError(null);
-    setNoProfile(false);
-    setJobs([]);
-    setNextOffset(0);
-    setHasMore(false);
+  // ----- Recommended tab — single query, no pagination -----
+  const recommendedQuery = useQuery({
+    queryKey: queryKeys.jobs.recommended(),
+    queryFn: () => jobsApi.recommended(),
+    enabled: tab === "recommended",
+    retry: false,
+  });
 
-    const run = async () => {
-      try {
-        if (tab === "recommended") {
-          const rows = await jobsApi.recommended();
-          if (cancelled) return;
-          setJobs(rows);
-          setHasMore(false);
-        } else {
-          const { items, more } = await fetchBatch(0);
-          if (cancelled) return;
-          setJobs(items);
-          setNextOffset(items.length);
-          setHasMore(more);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        if (err instanceof ApiError) {
-          if (err.status === 404 && tab === "recommended") setNoProfile(true);
-          else setError(err.detail);
-        }
-      } finally {
-        if (!cancelled) setInitialLoading(false);
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [filters, tab, fetchBatch]);
+  // ----- Bookmarks (a separate cache slice) -----
+  const bookmarksQuery = useQuery({
+    queryKey: queryKeys.bookmarks.all(),
+    queryFn: () => bookmarksApi.list(),
+  });
+  const bookmarkedIds = new Set((bookmarksQuery.data ?? []).map((b) => b.job_id));
 
-  const loadMore = useCallback(async () => {
-    if (loadingMore || !hasMore || tab !== "all") return;
-    setLoadingMore(true);
-    try {
-      const { items, more } = await fetchBatch(nextOffset);
-      setJobs((prev) => [...(prev as Job[]), ...items]);
-      setNextOffset((o) => o + items.length);
-      setHasMore(more);
-    } catch (err) {
-      if (err instanceof ApiError) setError(err.detail);
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [fetchBatch, hasMore, loadingMore, nextOffset, tab]);
+  const addBookmark = useMutation({
+    mutationFn: (jobId: number) => bookmarksApi.add(jobId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.bookmarks.all() }),
+    onError: (err) => notifyError(err, "Could not save job"),
+  });
+  const removeBookmark = useMutation({
+    mutationFn: (jobId: number) => bookmarksApi.remove(jobId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.bookmarks.all() }),
+    onError: (err) => notifyError(err, "Could not remove bookmark"),
+  });
 
-  // IntersectionObserver: when the sentinel below the list scrolls into
-  // view, transparently fetch the next batch. Falls back gracefully to the
-  // visible "Load more" button if the user is on a browser without IO or
-  // prefers reduced motion.
+  const toggleBookmark = (jobId: number) => {
+    if (bookmarkedIds.has(jobId)) removeBookmark.mutate(jobId);
+    else addBookmark.mutate(jobId);
+  };
+
+  // Flatten infinite pages into one list to render.
+  const allJobs: Job[] = jobsInfinite.data?.pages.flatMap((p) => p.items) ?? [];
+  const recommended: RecommendedJob[] = recommendedQuery.data ?? [];
+  const jobs: (Job | RecommendedJob)[] = tab === "all" ? allJobs : recommended;
+
+  // Recommended-tab 404 means "no profile saved yet" — surface that with a
+  // dedicated empty-state card rather than a generic error.
+  const noProfile =
+    tab === "recommended" &&
+    recommendedQuery.error instanceof ApiError &&
+    recommendedQuery.error.status === 404;
+
+  // The list-error gate. Use the right query's error per tab.
+  const listError =
+    tab === "all"
+      ? jobsInfinite.error instanceof Error
+        ? jobsInfinite.error.message
+        : null
+      : noProfile
+        ? null
+        : recommendedQuery.error instanceof Error
+          ? recommendedQuery.error.message
+          : null;
+
+  const initialLoading = tab === "all" ? jobsInfinite.isLoading : recommendedQuery.isLoading;
+
+  const loadMore = useCallback(() => {
+    if (tab !== "all") return;
+    if (!jobsInfinite.hasNextPage || jobsInfinite.isFetchingNextPage) return;
+    void jobsInfinite.fetchNextPage();
+  }, [jobsInfinite, tab]);
+
+  // IntersectionObserver triggers the next page when the sentinel scrolls
+  // into view. Stays decoupled from React Query's pagination — RQ owns the
+  // cache; this is just the visual signal.
   useEffect(() => {
     if (tab !== "all") return;
     const node = sentinelRef.current;
     if (!node || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting)) void loadMore();
+        if (entries.some((e) => e.isIntersecting)) loadMore();
       },
       { rootMargin: "200px" },
     );
@@ -164,31 +179,6 @@ export function CandidateJobsPage() {
       searchParams.set("tab", "recommended");
     }
     setSearchParams(searchParams, { replace: true });
-  };
-
-  useEffect(() => {
-    bookmarksApi
-      .list()
-      .then((rows) => setBookmarkedIds(new Set(rows.map((b) => b.job_id))))
-      .catch(() => undefined);
-  }, []);
-
-  const toggleBookmark = async (jobId: number) => {
-    try {
-      if (bookmarkedIds.has(jobId)) {
-        await bookmarksApi.remove(jobId);
-        setBookmarkedIds((s) => {
-          const next = new Set(s);
-          next.delete(jobId);
-          return next;
-        });
-      } else {
-        await bookmarksApi.add(jobId);
-        setBookmarkedIds((s) => new Set(s).add(jobId));
-      }
-    } catch (err) {
-      if (err instanceof ApiError) setError(err.detail);
-    }
   };
 
   const update = <K extends keyof Filters>(key: K, value: Filters[K]) =>
@@ -348,13 +338,13 @@ export function CandidateJobsPage() {
           </button>
         </div>
 
-        <ErrorBanner message={error} />
+        <ErrorBanner message={listError} />
         <div className="sr-only" role="status" aria-live="polite">
           {initialLoading
             ? "Loading jobs"
-            : loadingMore
+            : jobsInfinite.isFetchingNextPage
               ? `Showing ${jobs.length} jobs, loading more`
-              : `Showing ${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}${hasMore ? ", more available" : ""}`}
+              : `Showing ${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}${jobsInfinite.hasNextPage ? ", more available" : ""}`}
         </div>
 
         {noProfile ? (
@@ -381,18 +371,18 @@ export function CandidateJobsPage() {
         ) : (
           <>
             {jobs.map((j) => {
-              const recommended = "score" in j ? (j as RecommendedJob) : null;
+              const rec = "score" in j ? (j as RecommendedJob) : null;
               return (
                 <div key={j.id} className="relative">
                   <JobCard
                     job={j}
                     isBookmarked={bookmarkedIds.has(j.id)}
                     onBookmarkToggle={() => toggleBookmark(j.id)}
-                    matchedSkills={recommended?.score.matched_skills}
+                    matchedSkills={rec?.score.matched_skills}
                   />
-                  {recommended ? (
+                  {rec ? (
                     <div className="absolute right-5 top-5">
-                      <ScoreBadge score={recommended.score} />
+                      <ScoreBadge score={rec.score} />
                     </div>
                   ) : null}
                 </div>
@@ -400,15 +390,15 @@ export function CandidateJobsPage() {
             })}
             {tab === "all" ? (
               <div ref={sentinelRef} className="pt-2 text-center">
-                {hasMore ? (
+                {jobsInfinite.hasNextPage ? (
                   <button
                     type="button"
-                    onClick={() => void loadMore()}
-                    disabled={loadingMore}
+                    onClick={loadMore}
+                    disabled={jobsInfinite.isFetchingNextPage}
                     className="btn-secondary text-xs"
                     aria-label="Load more jobs"
                   >
-                    {loadingMore ? "Loading more…" : "Load more"}
+                    {jobsInfinite.isFetchingNextPage ? "Loading more…" : "Load more"}
                   </button>
                 ) : (
                   <p className="text-xs text-slate-400">
@@ -424,4 +414,3 @@ export function CandidateJobsPage() {
     </div>
   );
 }
-

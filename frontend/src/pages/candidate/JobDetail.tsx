@@ -1,12 +1,13 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useParams } from "react-router-dom";
 import { z } from "zod";
 
-import { ApiError } from "@/api/client";
 import { applicationsApi, bookmarksApi, jobsApi } from "@/api/endpoints";
-import type { Job, ResumeUploadResponse } from "@/api/types";
+import { queryKeys } from "@/api/queryKeys";
+import type { ApplicationCreate, ResumeUploadResponse } from "@/api/types";
 import { DeadlinePill } from "@/components/DeadlinePill";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { ResumeUpload } from "@/components/ResumeUpload";
@@ -17,6 +18,7 @@ import {
   formatExp,
   locationLabel,
 } from "@/lib/format";
+import { notify, notifyError } from "@/lib/toast";
 
 const applySchema = z.object({
   cover_note: z.string().max(5000, "Cover note too long"),
@@ -29,14 +31,11 @@ const applySchema = z.object({
 type ApplyValues = z.infer<typeof applySchema>;
 
 export function CandidateJobDetailPage() {
+  const queryClient = useQueryClient();
   const { id } = useParams<{ id: string }>();
   const jobId = Number(id);
 
-  const [job, setJob] = useState<Job | null>(null);
-  const [isBookmarked, setIsBookmarked] = useState(false);
-  const [applied, setApplied] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [skills, setSkills] = useState<string[]>([]);
   const [resume, setResume] = useState<ResumeUploadResponse | null>(null);
   const [autofillNotice, setAutofillNotice] = useState<string | null>(null);
@@ -45,7 +44,7 @@ export function CandidateJobDetailPage() {
     register,
     handleSubmit,
     setValue,
-    formState: { errors, isSubmitting },
+    formState: { errors },
     reset,
   } = useForm<ApplyValues>({
     resolver: zodResolver(applySchema),
@@ -58,44 +57,53 @@ export function CandidateJobDetailPage() {
     },
   });
 
-  useEffect(() => {
-    if (!jobId) return;
-    setError(null);
-    jobsApi
-      .get(jobId)
-      .then(setJob)
-      .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not load job"));
+  const jobQuery = useQuery({
+    queryKey: queryKeys.jobs.detail(jobId),
+    queryFn: () => jobsApi.get(jobId),
+    enabled: !!jobId,
+  });
 
-    bookmarksApi
-      .list()
-      .then((rows) => setIsBookmarked(rows.some((b) => b.job_id === jobId)))
-      .catch(() => undefined);
+  const bookmarksQuery = useQuery({
+    queryKey: queryKeys.bookmarks.all(),
+    queryFn: () => bookmarksApi.list(),
+  });
+  const isBookmarked = (bookmarksQuery.data ?? []).some((b) => b.job_id === jobId);
 
-    applicationsApi
-      .mine()
-      .then((apps) => setApplied(apps.some((a) => a.job_id === jobId)))
-      .catch(() => undefined);
-  }, [jobId]);
+  const myApps = useQuery({
+    queryKey: queryKeys.applications.mine({}),
+    queryFn: () => applicationsApi.mine(),
+  });
+  const applied = (myApps.data ?? []).some((a) => a.job_id === jobId);
 
-  const toggleBookmark = async () => {
-    try {
-      if (isBookmarked) {
-        await bookmarksApi.remove(jobId);
-        setIsBookmarked(false);
-      } else {
-        await bookmarksApi.add(jobId);
-        setIsBookmarked(true);
-      }
-    } catch (err) {
-      if (err instanceof ApiError) setError(err.detail);
-    }
-  };
+  const addBookmark = useMutation({
+    mutationFn: () => bookmarksApi.add(jobId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.bookmarks.all() }),
+    onError: (err) => notifyError(err, "Could not save job"),
+  });
+  const removeBookmark = useMutation({
+    mutationFn: () => bookmarksApi.remove(jobId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.bookmarks.all() }),
+    onError: (err) => notifyError(err, "Could not remove bookmark"),
+  });
+  const toggleBookmark = () =>
+    isBookmarked ? removeBookmark.mutate() : addBookmark.mutate();
+
+  const applyMutation = useMutation({
+    mutationFn: (payload: ApplicationCreate) => applicationsApi.apply(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.applications.all() });
+      setShowForm(false);
+      setSkills([]);
+      setResume(null);
+      setAutofillNotice(null);
+      reset();
+      notify.success("Application submitted.");
+    },
+    onError: (err) => notifyError(err, "Failed to apply"),
+  });
 
   const onResumeUploaded = (result: ResumeUploadResponse) => {
     setResume(result);
-    // Apply autofill: skills (merge with whatever the candidate already
-    // typed) and years_experience (only if non-null and the form value
-    // is still the default 0 — never clobber an explicit entry).
     const newSkills = Array.from(
       new Set([...skills, ...result.autofill.skills.filter(Boolean)]),
     );
@@ -123,32 +131,24 @@ export function CandidateJobDetailPage() {
     }
   };
 
-  const onApply = handleSubmit(async (values) => {
-    setError(null);
-    try {
-      await applicationsApi.apply({
-        job_id: jobId,
-        resume_key: resume?.resume_key ?? null,
-        cover_note: values.cover_note,
-        current_ctc: values.current_ctc,
-        expected_ctc: values.expected_ctc,
-        notice_period_days: values.notice_period_days,
-        years_experience: values.years_experience,
-        skills,
-      });
-      setApplied(true);
-      setShowForm(false);
-      setSkills([]);
-      setResume(null);
-      setAutofillNotice(null);
-      reset();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Failed to apply");
-    }
-  });
+  const onApply = handleSubmit((values) =>
+    applyMutation.mutate({
+      job_id: jobId,
+      resume_key: resume?.resume_key ?? null,
+      cover_note: values.cover_note,
+      current_ctc: values.current_ctc,
+      expected_ctc: values.expected_ctc,
+      notice_period_days: values.notice_period_days,
+      years_experience: values.years_experience,
+      skills,
+    }),
+  );
+
+  const job = jobQuery.data;
+  const jobError = jobQuery.error instanceof Error ? jobQuery.error.message : null;
 
   if (!job) {
-    return <div className="text-slate-500">{error ?? "Loading…"}</div>;
+    return <div className="text-slate-500">{jobError ?? "Loading…"}</div>;
   }
 
   return (
@@ -204,7 +204,6 @@ export function CandidateJobDetailPage() {
           <p className="text-xs text-slate-500">
             Fields marked <span className="text-rose-600">*</span> are required.
           </p>
-          <ErrorBanner message={error} />
 
           <div>
             <label className="label" htmlFor="apply-resume-file">
@@ -313,14 +312,18 @@ export function CandidateJobDetailPage() {
             <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">
               Cancel
             </button>
-            <button type="submit" className="btn-primary" disabled={isSubmitting || !resume}>
-              {isSubmitting ? "Submitting…" : "Submit application"}
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={applyMutation.isPending || !resume}
+            >
+              {applyMutation.isPending ? "Submitting…" : "Submit application"}
             </button>
           </div>
         </form>
       ) : null}
 
-      {error && !showForm ? <ErrorBanner message={error} /> : null}
+      <ErrorBanner message={jobError} />
     </div>
   );
 }

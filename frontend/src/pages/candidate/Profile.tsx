@@ -1,14 +1,16 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link } from "react-router-dom";
 import { z } from "zod";
 
-import { ApiError } from "@/api/client";
 import { profileApi } from "@/api/endpoints";
+import { queryKeys } from "@/api/queryKeys";
 import type { LocationType } from "@/api/types";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { TagInput } from "@/components/TagInput";
+import { notify, notifyError } from "@/lib/toast";
 
 const schema = z.object({
   years_experience: z.coerce.number().int().min(0).max(60),
@@ -24,9 +26,7 @@ const LOCATION_OPTIONS: { value: LocationType; label: string }[] = [
 ];
 
 export function CandidateProfilePage() {
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [hasProfile, setHasProfile] = useState(false);
+  const queryClient = useQueryClient();
   const [skills, setSkills] = useState<string[]>([]);
   const [locations, setLocations] = useState<LocationType[]>([]);
 
@@ -34,7 +34,7 @@ export function CandidateProfilePage() {
     register,
     handleSubmit,
     reset,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -43,23 +43,60 @@ export function CandidateProfilePage() {
     },
   });
 
+  const profileQuery = useQuery({
+    queryKey: queryKeys.profile.me(),
+    queryFn: () => profileApi.get(),
+  });
+
+  // Seed the local skill / location / form state when the profile query
+  // first lands. Done in an effect (not derived render-time) so the user
+  // can freely edit afterwards without us clobbering their input on every
+  // re-render.
   useEffect(() => {
-    profileApi
-      .get()
-      .then((profile) => {
-        if (!profile) return;
-        setHasProfile(true);
-        setSkills(profile.skills);
-        setLocations(profile.preferred_locations);
-        reset({
-          years_experience: profile.years_experience,
-          expected_ctc: profile.expected_ctc,
-        });
-      })
-      .catch((err) => {
-        if (err instanceof ApiError) setError(err.detail);
-      });
-  }, [reset]);
+    const profile = profileQuery.data;
+    if (!profile) return;
+    setSkills(profile.skills);
+    setLocations(profile.preferred_locations);
+    reset({
+      years_experience: profile.years_experience,
+      expected_ctc: profile.expected_ctc,
+    });
+  }, [profileQuery.data, reset]);
+
+  const hasProfile = !!profileQuery.data;
+  const queryError = profileQuery.error instanceof Error ? profileQuery.error.message : null;
+
+  const saveMutation = useMutation({
+    mutationFn: (values: FormValues) =>
+      profileApi.upsert({
+        skills,
+        years_experience: values.years_experience,
+        expected_ctc: values.expected_ctc,
+        preferred_locations: locations,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.profile.me() });
+      // Recommended jobs are now stale (different scoring against new
+      // profile); invalidate so a return-trip to /jobs?tab=recommended
+      // refetches.
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs.recommended() });
+      notify.success("Profile saved.");
+    },
+    onError: (err) => notifyError(err, "Could not save profile"),
+  });
+
+  const clearMutation = useMutation({
+    mutationFn: () => profileApi.remove(),
+    onSuccess: () => {
+      setSkills([]);
+      setLocations([]);
+      reset({ years_experience: 0, expected_ctc: 0 });
+      queryClient.invalidateQueries({ queryKey: queryKeys.profile.me() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs.recommended() });
+      notify.success("Profile cleared.");
+    },
+    onError: (err) => notifyError(err, "Could not clear profile"),
+  });
 
   const toggleLocation = (loc: LocationType) => {
     setLocations((prev) =>
@@ -67,35 +104,16 @@ export function CandidateProfilePage() {
     );
   };
 
-  const onSubmit = handleSubmit(async (values) => {
-    setError(null);
-    setSaved(false);
-    try {
-      await profileApi.upsert({
-        skills,
-        years_experience: values.years_experience,
-        expected_ctc: values.expected_ctc,
-        preferred_locations: locations,
-      });
-      setHasProfile(true);
-      setSaved(true);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not save profile");
-    }
-  });
+  const onSubmit = handleSubmit((values) => saveMutation.mutate(values));
 
-  const clearProfile = async () => {
-    if (!confirm("Delete your saved profile? Recommendations will stop showing until you save a new one.")) return;
-    try {
-      await profileApi.remove();
-      setHasProfile(false);
-      setSkills([]);
-      setLocations([]);
-      reset({ years_experience: 0, expected_ctc: 0 });
-      setSaved(false);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not clear profile");
-    }
+  const clearProfile = () => {
+    if (
+      !confirm(
+        "Delete your saved profile? Recommendations will stop showing until you save a new one.",
+      )
+    )
+      return;
+    clearMutation.mutate();
   };
 
   return (
@@ -116,12 +134,7 @@ export function CandidateProfilePage() {
       </header>
 
       <form onSubmit={onSubmit} className="card space-y-4" noValidate>
-        <ErrorBanner message={error} />
-        {saved ? (
-          <div role="status" aria-live="polite" className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-            Profile saved. <Link to="/jobs?tab=recommended" className="font-medium underline">See recommendations →</Link>
-          </div>
-        ) : null}
+        <ErrorBanner message={queryError} />
 
         <div>
           <label className="label" htmlFor="profile-skills">
@@ -216,12 +229,19 @@ export function CandidateProfilePage() {
 
         <div className="flex flex-wrap justify-between gap-2">
           {hasProfile ? (
-            <button type="button" onClick={clearProfile} className="btn-secondary text-sm text-rose-700">
-              Delete profile
+            <button
+              type="button"
+              onClick={clearProfile}
+              className="btn-secondary text-sm text-rose-700"
+              disabled={clearMutation.isPending}
+            >
+              {clearMutation.isPending ? "Deleting…" : "Delete profile"}
             </button>
-          ) : <span />}
-          <button type="submit" className="btn-primary" disabled={isSubmitting}>
-            {isSubmitting
+          ) : (
+            <span />
+          )}
+          <button type="submit" className="btn-primary" disabled={saveMutation.isPending}>
+            {saveMutation.isPending
               ? "Saving…"
               : hasProfile
                 ? isDirty || skills.length > 0 || locations.length > 0
