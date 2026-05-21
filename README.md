@@ -113,11 +113,12 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 | Feature                          | How to reach it                                              |
 |----------------------------------|--------------------------------------------------------------|
 | Dashboard (counts + funnel)      | Log in as HR → lands on `/hr`.                               |
+| **Cross-job candidate inbox**    | `Candidates` in the nav (`/hr/applicants`). One screen showing every applicant on every job the HR owns; per-stage counters, "Filter by job" dropdown, all the per-job filters, inline stage moves and notes drawer — answers "who applied this week across all my jobs". |
 | Post a new job                   | `/hr/jobs` → **+ Post a job**, or top-right shortcut.        |
 | Edit / pause / close / delete    | `/hr/jobs` → per-row controls.                               |
-| Review applicants                | Job row → **Applicants** opens `/hr/jobs/:id/applicants`.    |
+| Per-job applicants               | Job row → **Applicants** opens `/hr/jobs/:id/applicants`.    |
 | Pipeline filters                 | Left sidebar: skills (any/all), experience range, current/expected CTC ceiling, max notice, applied-date range, stage, keyword search across cover note and skills, plus four sort modes (recent, lowest expected CTC, shortest notice, most experienced). |
-| Move candidate between stages    | Per-row stage dropdown on the applicants table. Each change is recorded with the time it happened and who made it. |
+| Move candidate between stages    | Per-row stage dropdown on either applicants table. Each change is recorded with the time it happened and who made it. |
 | Private internal notes           | **Notes** drawer on each applicant row. Candidates never see these notes (enforced both in the UI and the API). |
 
 ### Candidate
@@ -162,10 +163,14 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 ## 7. Security notes
 
 - Passwords are stored as bcrypt hashes; the configured cost factor matches passlib's `bcrypt__default_rounds`.
-- JWTs are HS256, signed with `JWT_SECRET` from the environment, and expire after 30 minutes.
-- Every non-auth endpoint requires a valid token; HR-only endpoints additionally enforce role + ownership (an HR user cannot edit or view applicants for another HR's job).
+- JWTs are HS256, signed with `JWT_SECRET` from the environment, and expire after 30 minutes. The app **refuses to boot** when `JWT_SECRET` is a known placeholder value (`change-me`, the comment-marker default, etc.) — set a real secret with `openssl rand -hex 32` before any non-local deployment.
+- Tokens carry both `sub` (user id) and `role`; every authenticated request re-reads the DB user and verifies the token's `role` claim still matches the current account role, so a token issued before a future role demotion would be rejected.
+- Every non-auth endpoint requires a valid token; HR-only endpoints additionally enforce role + ownership (an HR user cannot edit, view, or stage-move applications on another HR's job).
+- **HR self-signup is disabled by default.** `POST /api/auth/register` only accepts the `candidate` role unless `ALLOW_HR_SELF_REGISTER=true` is set in the environment. The seeded HR user is the only HR account in the demo; in production this is where an invite/admin flow would plug in.
+- The two unique constraints on `applications(job_id, candidate_id)` and `bookmarks(candidate_id, job_id)` are the source of truth for "no duplicates" — the routers handle the `IntegrityError` path explicitly so a race between two concurrent POSTs returns a clean 409 / 200 instead of a 500.
 - All SQL goes through SQLAlchemy parameterised queries — no string interpolation.
-- Input validation runs on both ends: Pydantic on the backend, zod on the frontend.
+- Input validation runs on both ends: Pydantic on the backend, zod on the frontend. The browser's stored token is wiped and the user redirected to `/login` whenever any authenticated request returns 401.
+- CORS uses `allow_credentials=False` and explicit method/header allow-lists; auth is bearer-token only so credentials on the CORS preflight are unnecessary, and keeping them off avoids the CSRF-shaped footgun a future cookie session would inherit.
 - `.env` is gitignored; only `.env.example` is committed.
 - No secrets are echoed in responses (the `User` serialiser deliberately omits `password_hash`).
 
@@ -228,7 +233,8 @@ skypoint-assessment/
 
 These were added on top of the brief's checklist to make the app more memorable:
 
-- **Application timeline.** Every stage transition is recorded as an immutable event row (`application_events`); candidates can expand any application on `/me/applications` to see the full progression with timestamps.
+- **Cross-job candidate inbox for HR.** `/hr/applicants` rolls up every applicant on every job the HR owns into one screen with per-stage counters that double as filter buttons, plus the full filter surface from the per-job view and a "Filter by job" dropdown. The backend endpoint (`GET /api/applications/all`) is HR-scoped at the SQL level via a subquery, so an HR can never see applications on jobs they don't own.
+- **Application timeline.** Every stage transition is recorded as an immutable event row (`application_events`); candidates can expand any application on `/me/applications` to see the full progression with timestamps. The same timeline shows inside the HR notes drawer.
 - **Live deadline countdown.** Job cards and the job detail page render *Closes in N days / Closes today / Closed* pills, colored by urgency, so candidates know at a glance how much time they have.
 - **Interactive API docs at `/api/docs`.** The FastAPI Swagger UI is served through the same nginx proxy, so an assessor can poke at the API without needing curl.
 - **CI on every push.** The GitHub Actions workflow runs `pytest` against a real Postgres service container and builds the production frontend bundle, so a broken commit shows up red before it hits `main`.
