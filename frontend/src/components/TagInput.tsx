@@ -47,7 +47,10 @@ export function TagInput({
   const commit = (raw: string) => {
     const additions = raw
       .split(",")
-      .map((s) => s.trim().toLowerCase())
+      // Match backend `normalize_skill()` — lowercase + trim + collapse
+      // internal whitespace so "React  Native" and "react native"
+      // round-trip equal across the scoring engine.
+      .map((s) => s.trim().toLowerCase().split(/\s+/).filter(Boolean).join(" "))
       .filter(Boolean);
     if (additions.length === 0) return;
     const merged: string[] = [...value];

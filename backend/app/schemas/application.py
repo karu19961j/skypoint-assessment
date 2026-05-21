@@ -84,14 +84,13 @@ class ApplicationEventOut(BaseModel):
     created_at: datetime
 
 
-class ScoreBreakdownOut(BaseModel):
-    total: int
-    skill: int
-    exp: int
-    ctc: int
-    notice: int
-    location: int
-    matched_skills: list[str]
+from app.schemas.score import BaseScoreOut
+
+
+class ScoreBreakdownOut(BaseScoreOut):
+    """Score for HR's candidate ranking. The notice-period bonus is
+    populated; the location bonus is always 0 (it's a recommendations
+    concept, not a ranking one)."""
 
 
 class RankedApplicationOut(ApplicationDetail):

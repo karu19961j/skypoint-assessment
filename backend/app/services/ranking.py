@@ -21,26 +21,53 @@ The same scoring engine drives both directions:
 
 from dataclasses import dataclass
 
+# Point caps per scoring component. Lifted out of the function signatures
+# so the single source of truth lives at module top — the README, the
+# frontend ScoreBadge component, and the spec all reference these
+# numbers.
+SKILL_POINTS = 50
+EXP_POINTS = 30
+CTC_POINTS = 20
+NOTICE_POINTS = 5    # HR ranking only (immediate-joiner bonus)
+LOCATION_POINTS = 10  # Candidate recommendations only (preferred-location bonus)
+TOTAL_CAP = 100  # Clamp the sum here so the badge fits in two digits.
+
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, value))
 
 
-def _skill_match_score(required: list[str], candidate: list[str], max_points: int = 50) -> tuple[int, list[str]]:
-    """Matched skills ÷ required skills × max_points (case-insensitive)."""
+def normalize_skill(s: str) -> str:
+    """Lowercase, trim, and collapse internal whitespace.
+
+    `"React  Native"` (two spaces from a paste) and `"react native"`
+    must compare equal — otherwise the candidate sees their match drop
+    to zero for a typo nobody can see. The same normaliser runs in
+    `frontend/src/components/TagInput.tsx`.
+    """
+    return " ".join(s.lower().split())
+
+
+def _normalize_set(skills: list[str]) -> set[str]:
+    return {normalize_skill(s) for s in skills if s and s.strip()}
+
+
+def _skill_match_score(required: list[str], candidate: list[str], max_points: int = SKILL_POINTS) -> tuple[int, list[str]]:
+    """Matched skills ÷ required skills × max_points (case-insensitive,
+    whitespace-collapsed)."""
     if not required:
         # No required skills declared on the job → don't penalise candidates;
         # award full points to keep ranking dominated by exp/CTC fit.
         return max_points, []
-    required_set = {s.lower().strip() for s in required if s and s.strip()}
-    candidate_set = {s.lower().strip() for s in candidate if s and s.strip()}
+    required_set = _normalize_set(required)
+    candidate_set = _normalize_set(candidate)
     matched = sorted(required_set & candidate_set)
     score = round((len(matched) / len(required_set)) * max_points)
     return score, matched
 
 
 def _experience_fit_score(
-    candidate_years: int, job_min: int, job_max: int, max_points: int = 30
+    candidate_years: int, job_min: int, job_max: int, max_points: int = EXP_POINTS
 ) -> int:
     """Full points if within the job's exp range, scaled if outside.
 
@@ -58,7 +85,7 @@ def _experience_fit_score(
 
 
 def _ctc_alignment_score(
-    expected: int, job_min: int, job_max: int, max_points: int = 20
+    expected: int, job_min: int, job_max: int, max_points: int = CTC_POINTS
 ) -> int:
     """Full points if expected CTC falls inside the job's salary range,
     scaled down linearly as expected exceeds job_max."""
@@ -73,7 +100,7 @@ def _ctc_alignment_score(
     return round(max_points * _clamp(1 - over / max(job_max, 1)))
 
 
-def _notice_bonus_score(notice_days: int, max_points: int = 5) -> int:
+def _notice_bonus_score(notice_days: int, max_points: int = NOTICE_POINTS) -> int:
     """Immediate joiner = full bonus; linearly fades to zero at 90 days+."""
     notice_days = max(0, notice_days)
     return round(max_points * _clamp(1 - notice_days / 90))
@@ -106,7 +133,7 @@ def score_application_for_job(
     exp = _experience_fit_score(candidate_years, job_exp_min, job_exp_max)
     ctc = _ctc_alignment_score(candidate_expected_ctc, job_ctc_min, job_ctc_max)
     notice = _notice_bonus_score(candidate_notice_days)
-    total = min(100, skill + exp + ctc + notice)
+    total = min(TOTAL_CAP, skill + exp + ctc + notice)
     return ScoreBreakdown(
         total=total, skill=skill, exp=exp, ctc=ctc, notice=notice,
         location=0, matched_skills=matched,
@@ -136,8 +163,8 @@ def score_job_for_profile(
     exp = _experience_fit_score(profile_years, job_exp_min, job_exp_max)
     ctc = _ctc_alignment_score(profile_expected_ctc, job_ctc_min, job_ctc_max)
     notice = 0  # candidate profile has no notice period; that's per-application
-    location = 10 if job_location_type in profile_preferred_locations else 0
-    total = min(100, skill + exp + ctc + notice + location)
+    location = LOCATION_POINTS if job_location_type in profile_preferred_locations else 0
+    total = min(TOTAL_CAP, skill + exp + ctc + notice + location)
     return ScoreBreakdown(
         total=total, skill=skill, exp=exp, ctc=ctc, notice=notice,
         location=location, matched_skills=matched,

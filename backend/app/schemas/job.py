@@ -63,13 +63,13 @@ class JobOut(JobBase):
     created_at: datetime
 
 
-class JobScoreOut(BaseModel):
-    total: int
-    skill: int
-    exp: int
-    ctc: int
-    location: int
-    matched_skills: list[str]
+from app.schemas.score import BaseScoreOut
+
+
+class JobScoreOut(BaseScoreOut):
+    """Score for candidate recommendations. The location bonus is
+    populated; the notice bonus is always 0 (it's a ranking concept,
+    not a recommendations one)."""
 
 
 class RecommendedJobOut(JobOut):
