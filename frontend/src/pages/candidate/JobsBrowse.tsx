@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
@@ -37,11 +37,11 @@ const EMPTY: Filters = {
   sort: "recent",
 };
 
-function buildQuery(f: Filters, page: number): JobListFilters {
+function buildQuery(f: Filters, offset: number): JobListFilters {
   const q: JobListFilters = {
     sort: f.sort,
     limit: PAGE_SIZE + 1, // +1 acts as a "has next page" probe
-    offset: page * PAGE_SIZE,
+    offset,
   };
   if (f.q.trim()) q.q = f.q.trim();
   if (f.location_type) q.location_type = f.location_type;
@@ -61,55 +61,101 @@ export function CandidateJobsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: Tab = searchParams.get("tab") === "recommended" ? "recommended" : "all";
   const [filters, setFilters] = useState<Filters>(EMPTY);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
   const [jobs, setJobs] = useState<Job[] | RecommendedJob[]>([]);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [noProfile, setNoProfile] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  const query = useMemo(() => buildQuery(filters, page), [filters, page]);
+  // The fetcher for one batch starting at `offset`. Returns the items to
+  // append + whether there's another batch behind it.
+  const fetchBatch = useCallback(
+    async (offset: number) => {
+      const rows = await jobsApi.list(buildQuery(filters, offset));
+      return {
+        items: rows.slice(0, PAGE_SIZE),
+        more: rows.length > PAGE_SIZE,
+      };
+    },
+    [filters],
+  );
 
-  // Reset to page 1 on any filter or tab change.
+  // Reload from scratch whenever filters or the tab change.
   useEffect(() => {
-    setPage(0);
-  }, [filters, tab]);
-
-  useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
+    setInitialLoading(true);
     setError(null);
     setNoProfile(false);
+    setJobs([]);
+    setNextOffset(0);
+    setHasMore(false);
 
-    if (tab === "recommended") {
-      jobsApi
-        .recommended()
-        .then((rows) => {
+    const run = async () => {
+      try {
+        if (tab === "recommended") {
+          const rows = await jobsApi.recommended();
+          if (cancelled) return;
           setJobs(rows);
           setHasMore(false);
-        })
-        .catch((err) => {
-          if (err instanceof ApiError) {
-            if (err.status === 404) setNoProfile(true);
-            else setError(err.detail);
-          }
-        })
-        .finally(() => setLoading(false));
-    } else {
-      jobsApi
-        .list(query)
-        .then((rows) => {
-          // We requested PAGE_SIZE+1; if we got the extra one, there's a
-          // next page available. Trim before render.
-          setHasMore(rows.length > PAGE_SIZE);
-          setJobs(rows.slice(0, PAGE_SIZE));
-        })
-        .catch((err) => {
-          if (err instanceof ApiError) setError(err.detail);
-        })
-        .finally(() => setLoading(false));
+        } else {
+          const { items, more } = await fetchBatch(0);
+          if (cancelled) return;
+          setJobs(items);
+          setNextOffset(items.length);
+          setHasMore(more);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError) {
+          if (err.status === 404 && tab === "recommended") setNoProfile(true);
+          else setError(err.detail);
+        }
+      } finally {
+        if (!cancelled) setInitialLoading(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [filters, tab, fetchBatch]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || tab !== "all") return;
+    setLoadingMore(true);
+    try {
+      const { items, more } = await fetchBatch(nextOffset);
+      setJobs((prev) => [...(prev as Job[]), ...items]);
+      setNextOffset((o) => o + items.length);
+      setHasMore(more);
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.detail);
+    } finally {
+      setLoadingMore(false);
     }
-  }, [query, tab]);
+  }, [fetchBatch, hasMore, loadingMore, nextOffset, tab]);
+
+  // IntersectionObserver: when the sentinel below the list scrolls into
+  // view, transparently fetch the next batch. Falls back gracefully to the
+  // visible "Load more" button if the user is on a browser without IO or
+  // prefers reduced motion.
+  useEffect(() => {
+    if (tab !== "all") return;
+    const node = sentinelRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) void loadMore();
+      },
+      { rootMargin: "200px" },
+    );
+    io.observe(node);
+    return () => io.disconnect();
+  }, [loadMore, tab]);
 
   const setTab = (next: Tab) => {
     if (next === "all") {
@@ -304,9 +350,11 @@ export function CandidateJobsPage() {
 
         <ErrorBanner message={error} />
         <div className="sr-only" role="status" aria-live="polite">
-          {loading
+          {initialLoading
             ? "Loading jobs"
-            : `Showing ${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}`}
+            : loadingMore
+              ? `Showing ${jobs.length} jobs, loading more`
+              : `Showing ${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}${hasMore ? ", more available" : ""}`}
         </div>
 
         {noProfile ? (
@@ -322,7 +370,7 @@ export function CandidateJobsPage() {
               Complete your profile
             </Link>
           </div>
-        ) : loading ? (
+        ) : initialLoading ? (
           <div className="text-slate-500">Loading jobs…</div>
         ) : jobs.length === 0 ? (
           <div className="card text-slate-500">
@@ -350,33 +398,25 @@ export function CandidateJobsPage() {
                 </div>
               );
             })}
-            {tab === "all" && (page > 0 || hasMore) ? (
-              <nav
-                className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-sm ring-1 ring-slate-200"
-                aria-label="Pagination"
-              >
-                <button
-                  type="button"
-                  className="btn-secondary text-xs"
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={page === 0}
-                  aria-label="Previous page"
-                >
-                  ← Previous
-                </button>
-                <span className="text-slate-500" aria-live="polite">
-                  Page {page + 1}
-                </span>
-                <button
-                  type="button"
-                  className="btn-secondary text-xs"
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={!hasMore}
-                  aria-label="Next page"
-                >
-                  Next →
-                </button>
-              </nav>
+            {tab === "all" ? (
+              <div ref={sentinelRef} className="pt-2 text-center">
+                {hasMore ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadMore()}
+                    disabled={loadingMore}
+                    className="btn-secondary text-xs"
+                    aria-label="Load more jobs"
+                  >
+                    {loadingMore ? "Loading more…" : "Load more"}
+                  </button>
+                ) : (
+                  <p className="text-xs text-slate-400">
+                    You&apos;ve reached the end ({jobs.length}{" "}
+                    {jobs.length === 1 ? "job" : "jobs"}).
+                  </p>
+                )}
+              </div>
             ) : null}
           </>
         )}
@@ -384,3 +424,4 @@ export function CandidateJobsPage() {
     </div>
   );
 }
+
