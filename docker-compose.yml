@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - jobportal
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_EXPIRES_MINUTES: ${JWT_EXPIRES_MINUTES}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      SEED_HR_EMAIL: ${SEED_HR_EMAIL}
+      SEED_HR_PASSWORD: ${SEED_HR_PASSWORD}
+      SEED_CANDIDATE_EMAIL: ${SEED_CANDIDATE_EMAIL}
+      SEED_CANDIDATE_PASSWORD: ${SEED_CANDIDATE_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8000"
+    networks:
+      - jobportal
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    networks:
+      - jobportal
+
+volumes:
+  pgdata:
+
+networks:
+  jobportal:
+    driver: bridge
