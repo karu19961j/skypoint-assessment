@@ -27,6 +27,7 @@ from app.schemas.application import (
     ApplicationOut,
     CandidateMini,
     JobMini,
+    ResumeMeta,
 )
 from app.sorts import ApplicantSort
 
@@ -89,17 +90,26 @@ def detail(application: Application, *, include_identity: bool = False) -> Appli
     """Build an ApplicationDetail payload.
 
     `include_identity=False` (the default for list endpoints) anonymizes
-    the response: candidate.full_name / candidate.email / resume_link are
-    stripped so the HR discovery view stays bias-free even when inspected
-    via the network tab. Use `include_identity=True` only when the caller
-    is explicitly asking for the full profile (e.g. `GET /applications/:id`
-    powering the Profile drawer).
+    the response: candidate.full_name / candidate.email / resume metadata
+    are stripped so the HR discovery view stays bias-free even when
+    inspected via the network tab. Use `include_identity=True` only when
+    the caller is explicitly asking for the full profile (e.g.
+    `GET /applications/:id` powering the Profile drawer).
     """
     base = ApplicationOut.model_validate(application).model_dump()
-    if not include_identity:
-        # Strip the resume URL from the list payload too — it can encode
-        # candidate identity (e.g. naukri.com/alice-singh-cv).
-        base["resume_link"] = ""
+    if include_identity:
+        # Filenames often encode candidate identity ("alice-singh-cv.pdf")
+        # so we only attach resume metadata on the identity-bearing path.
+        if application.resume_key:
+            base["resume"] = ResumeMeta(
+                filename=application.resume_filename,
+                size_bytes=application.resume_size_bytes,
+                content_type=application.resume_content_type,
+            ).model_dump()
+        else:
+            base["resume"] = None
+    else:
+        base["resume"] = None
     return ApplicationDetail(
         **base,
         job=JobMini.model_validate(application.job) if application.job else None,
@@ -247,10 +257,14 @@ def apply_filters(
         # array — the previous behaviour treated the whole string as one
         # skill, which never matched.
         skill_tokens = [tok for tok in f.q.strip().split() if tok]
+        # Search spans cover note, structured skill tags, AND extracted
+        # resume text — so HR can grep for terms a candidate typed into
+        # their resume but didn't bother adding as a skill tag.
         stmt = stmt.where(
             or_(
                 Application.cover_note.ilike(like),
                 Application.skills.op("&&")(skill_tokens),
+                Application.resume_text.ilike(like),
             )
         )
 
