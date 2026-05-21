@@ -7,7 +7,7 @@ import { ProtectedRoute } from "@/auth/ProtectedRoute";
 let mockUser: { role: "hr" | "candidate" } | null = null;
 let mockLoading = false;
 
-vi.mock("@/auth/AuthContext", () => ({
+vi.mock("@/auth/useAuth", () => ({
   useAuth: () => ({
     user: mockUser,
     loading: mockLoading,

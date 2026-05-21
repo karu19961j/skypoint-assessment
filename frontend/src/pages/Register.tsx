@@ -5,7 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { z } from "zod";
 
 import { ApiError } from "@/api/client";
-import { useAuth } from "@/auth/AuthContext";
+import { useAuth } from "@/auth/useAuth";
 import { ErrorBanner } from "@/components/ErrorBanner";
 
 // HR accounts are seeded (and would be provisioned via an admin/invite flow

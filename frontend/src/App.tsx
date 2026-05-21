@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
-import { AuthProvider, useAuth } from "@/auth/AuthContext";
+import { AuthProvider } from "@/auth/AuthContext";
+import { useAuth } from "@/auth/useAuth";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Layout } from "@/components/Layout";

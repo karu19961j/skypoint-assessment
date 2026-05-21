@@ -7,7 +7,7 @@ import { LoginPage } from "@/pages/Login";
 
 const loginMock = vi.fn();
 
-vi.mock("@/auth/AuthContext", () => ({
+vi.mock("@/auth/useAuth", () => ({
   useAuth: () => ({
     user: null,
     loading: false,

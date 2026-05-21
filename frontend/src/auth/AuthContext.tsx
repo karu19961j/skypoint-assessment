@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -11,21 +9,7 @@ import {
 import { ApiError, getToken, setToken, setUnauthorizedHandler } from "@/api/client";
 import { authApi } from "@/api/endpoints";
 import type { TokenResponse, User } from "@/api/types";
-
-interface AuthContextValue {
-  user: User | null;
-  loading: boolean;
-  login: (email: string, password: string) => Promise<User>;
-  register: (input: {
-    email: string;
-    password: string;
-    full_name: string;
-    role: "hr" | "candidate";
-  }) => Promise<User>;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+import { AuthContext, type AuthContextValue } from "./context";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -121,10 +105,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
 }
