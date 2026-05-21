@@ -1,16 +1,15 @@
-interface ScoreLike {
-  total: number;
-  skill: number;
-  exp: number;
-  ctc: number;
-  notice?: number;
-  location?: number;
-  matched_skills: string[];
-}
+import type { ScoreBreakdown } from "@/api/types";
+
+// Visual thresholds for the colour-coded fit badge. Promoted out of the
+// inline ternary so a future product/design change is a one-line edit.
+const SCORE_THRESHOLDS = {
+  good: 80,
+  ok: 60,
+} as const;
 
 function tone(total: number): string {
-  if (total >= 80) return "bg-emerald-100 text-emerald-800 ring-emerald-200";
-  if (total >= 60) return "bg-amber-100 text-amber-800 ring-amber-200";
+  if (total >= SCORE_THRESHOLDS.good) return "bg-emerald-100 text-emerald-800 ring-emerald-200";
+  if (total >= SCORE_THRESHOLDS.ok) return "bg-amber-100 text-amber-800 ring-amber-200";
   return "bg-rose-100 text-rose-800 ring-rose-200";
 }
 
@@ -20,22 +19,18 @@ interface BreakdownRow {
   max: number;
 }
 
-function rows(score: ScoreLike): BreakdownRow[] {
+function rows(score: ScoreBreakdown): BreakdownRow[] {
   const out: BreakdownRow[] = [
     { label: "Skills", value: score.skill, max: 50 },
     { label: "Experience", value: score.exp, max: 30 },
     { label: "CTC fit", value: score.ctc, max: 20 },
   ];
-  if (typeof score.notice === "number") {
-    out.push({ label: "Notice bonus", value: score.notice, max: 5 });
-  }
-  if (typeof score.location === "number" && score.location > 0) {
-    out.push({ label: "Location bonus", value: score.location, max: 10 });
-  }
+  if (score.notice > 0) out.push({ label: "Notice bonus", value: score.notice, max: 5 });
+  if (score.location > 0) out.push({ label: "Location bonus", value: score.location, max: 10 });
   return out;
 }
 
-export function ScoreBadge({ score }: { score: ScoreLike }) {
+export function ScoreBadge({ score }: { score: ScoreBreakdown }) {
   const breakdown = rows(score);
   const ariaSummary =
     `Fit score ${score.total} out of 100. ` +

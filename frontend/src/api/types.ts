@@ -118,7 +118,19 @@ export interface ApplicationEvent {
   created_at: string;
 }
 
-export interface ApplicationScore {
+/**
+ * Score breakdown shared between HR candidate ranking and candidate job
+ * recommendations. Mirrors `BaseScoreOut` on the backend.
+ *
+ *   - `notice` is meaningful only in HR ranking (immediate-joiner bonus);
+ *     recommendations emit 0.
+ *   - `location` is meaningful only in recommendations (preferred-location
+ *     match bonus); ranking emits 0.
+ *
+ * Both directions populate the same shape so `<ScoreBadge>` consumes a
+ * single type contract regardless of which endpoint produced it.
+ */
+export interface ScoreBreakdown {
   total: number;
   skill: number;
   exp: number;
@@ -128,21 +140,17 @@ export interface ApplicationScore {
   matched_skills: string[];
 }
 
-export interface RankedApplication extends Application {
-  score: ApplicationScore;
-}
+/** @deprecated use ScoreBreakdown */
+export type ApplicationScore = ScoreBreakdown;
+/** @deprecated use ScoreBreakdown */
+export type JobScore = ScoreBreakdown;
 
-export interface JobScore {
-  total: number;
-  skill: number;
-  exp: number;
-  ctc: number;
-  location: number;
-  matched_skills: string[];
+export interface RankedApplication extends Application {
+  score: ScoreBreakdown;
 }
 
 export interface RecommendedJob extends Job {
-  score: JobScore;
+  score: ScoreBreakdown;
 }
 
 export interface CandidateProfile {
