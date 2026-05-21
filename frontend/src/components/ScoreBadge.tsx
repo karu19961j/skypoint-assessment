@@ -49,7 +49,12 @@ export function ScoreBadge({ score }: { score: ScoreBreakdown }) {
       </span>
       <span
         role="tooltip"
-        className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 hidden w-60 -translate-x-1/2 rounded-lg bg-slate-900 px-3 py-2 text-left text-xs text-white shadow-xl group-hover:block group-focus-within:block"
+        // Anchor the popover to the badge's LEFT edge (not centred) so it
+        // doesn't extend past the table's left rail when the badge sits
+        // in the first column — the symptom was a clipped header
+        // ("kdown" instead of "Fit breakdown"). Width capped at
+        // min(15rem, 90vw) so narrow viewports show it without clipping.
+        className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-[min(15rem,90vw)] rounded-lg bg-slate-900 px-3 py-2 text-left text-xs text-white shadow-xl group-hover:block group-focus-within:block"
       >
         <span className="mb-1 block font-semibold text-white/90">Fit breakdown</span>
         <span className="block space-y-0.5">
