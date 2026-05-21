@@ -342,15 +342,18 @@ def test_hr_cannot_stage_move_another_hrs_application(
 def test_all_endpoint_scopes_to_requesting_hrs_jobs(
     client: TestClient, hr_headers: dict, candidate_headers: dict
 ) -> None:
-    # HR #1 has a job + an application
+    # HR #1 has a job + an application from the autouse-provisioned candidate.
     my_job = _create_job(client, hr_headers)
-    client.post(
+    apply1 = client.post(
         "/api/applications/",
         json=sample_application_payload(my_job),
         headers=candidate_headers,
     )
+    assert apply1.status_code == 201, apply1.text
 
-    # HR #2 has their own job + their own (different) application from a 2nd candidate
+    # HR #2 has their own job + a freshly-registered 2nd candidate. The
+    # 2nd candidate isn't covered by the autouse fixture, so we provision
+    # their profile + resume here before applying.
     other_hr = register_user(
         client, email="hr-y@example.com", password="Pass1234!", role="hr", full_name="HR Y"
     )
@@ -363,11 +366,22 @@ def test_all_endpoint_scopes_to_requesting_hrs_jobs(
         role="candidate",
         full_name="C2",
     )
-    client.post(
+    other_cand_headers = auth_headers(other_cand)
+    other_upload = client.post(
+        "/api/resume/upload",
+        headers=other_cand_headers,
+        files={"file": ("cv2.pdf", b"%PDF-1.4\nother", "application/pdf")},
+    )
+    assert other_upload.status_code == 201, other_upload.text
+    seed_candidate_profile(
+        client, other_cand_headers, resume_key=other_upload.json()["resume_key"]
+    )
+    apply2 = client.post(
         "/api/applications/",
         json=sample_application_payload(other_job),
-        headers=auth_headers(other_cand),
+        headers=other_cand_headers,
     )
+    assert apply2.status_code == 201, apply2.text
 
     # HR #1's feed: only the 1 application on their job
     mine = client.get("/api/applications/all", headers=hr_headers).json()

@@ -223,18 +223,21 @@ def test_download_blocked_for_other_hr(
     assert dl.status_code == 403
 
 
-def test_apply_blocked_without_resume_on_profile(
+def test_apply_blocked_without_profile(
     client: TestClient,
     hr_headers: dict[str, str],
     candidate_headers: dict[str, str],
     in_memory_storage: InMemoryStorage,
 ):
-    """Profile without a resume can't apply — surfaces a clear message."""
+    """No profile at all → clear 400 nudging the candidate to set one up.
+    Resume on profile is *not* server-enforced — internal-mobility / referral
+    flows legitimately apply without a CV and HR sees a "No resume on file"
+    pill. The UI gates the Apply button instead. So a profile without a
+    resume still applies successfully; only "no profile at all" 400s here."""
     job_id = client.post(
         "/api/jobs/", headers=hr_headers, json=sample_job_payload()
     ).json()["id"]
-    # Profile with NO resume_key.
-    seed_candidate_profile(client, candidate_headers, resume_key=None)
+    # No profile call — candidate is brand-new.
 
     apply_resp = client.post(
         "/api/applications/",
@@ -242,7 +245,7 @@ def test_apply_blocked_without_resume_on_profile(
         json=sample_application_payload(job_id),
     )
     assert apply_resp.status_code == 400
-    assert "resume" in apply_resp.json()["detail"].lower()
+    assert "profile" in apply_resp.json()["detail"].lower()
 
 
 # ---------- keyword search picks up resume_text ----------
