@@ -1,7 +1,7 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.deps import CurrentUser, DbSession, require_role
@@ -44,6 +44,7 @@ def _ensure_owner(job: Job, user: User) -> None:
 
 @router.get("/", response_model=list[JobOut])
 def list_jobs(
+    response: Response,
     db: DbSession,
     current_user: CurrentUser,
     q: str | None = None,
@@ -111,6 +112,16 @@ def list_jobs(
         stmt = stmt.order_by(Job.exp_min.asc(), Job.created_at.desc())
     else:
         stmt = stmt.order_by(Job.created_at.desc())
+
+    # Total count for page-number pagination. Strip the ORDER BY before
+    # counting — count(*) ignores it but Postgres still computes it and
+    # we'd be paying for ordering twice. The subquery reuses the filter
+    # WHERE clauses we've already built up.
+    count_stmt = select(func.count()).select_from(
+        stmt.order_by(None).subquery()
+    )
+    total = db.scalar(count_stmt) or 0
+    response.headers["X-Total-Count"] = str(total)
 
     stmt = stmt.limit(limit).offset(offset)
     jobs = db.scalars(stmt).all()

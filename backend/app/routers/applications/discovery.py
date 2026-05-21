@@ -11,8 +11,8 @@ opens the Profile drawer.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, select
 
 from app.deps import DbSession, require_role
 from app.models import Application, Job, User, UserRole
@@ -34,18 +34,31 @@ from ._helpers import (
 router = APIRouter()
 
 
+def _set_total_header(response: Response, db, stmt) -> None:
+    """Run a count(*) against the filtered statement and stash it on
+    the `X-Total-Count` response header. Order-by stripped so Postgres
+    doesn't bother computing it for the count."""
+    count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+    total = db.scalar(count_stmt) or 0
+    response.headers["X-Total-Count"] = str(total)
+
+
 @router.get("/by-job/{job_id}", response_model=list[ApplicationDetail])
 def list_applicants(
     job_id: int,
+    response: Response,
     db: DbSession,
     current_user: Annotated[User, Depends(require_role(UserRole.hr))],
     filters: Annotated[ApplicantFilters, Depends(applicant_filter_params)],
+    limit: int = Query(default=25, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
 ) -> list[ApplicationDetail]:
     get_hr_owned_job_or_403(db, job_id, current_user)
     stmt = apply_filters(
         select(Application).where(Application.job_id == job_id), filters
     )
-    apps = db.scalars(stmt).all()
+    _set_total_header(response, db, stmt)
+    apps = db.scalars(stmt.limit(limit).offset(offset)).all()
     return [detail(a) for a in apps]
 
 
@@ -97,6 +110,7 @@ def list_ranked_applicants(
 
 @router.get("/all", response_model=list[ApplicationDetail])
 def list_all_my_applicants(
+    response: Response,
     db: DbSession,
     current_user: Annotated[User, Depends(require_role(UserRole.hr))],
     filters: Annotated[ApplicantFilters, Depends(applicant_filter_params)],
@@ -104,6 +118,8 @@ def list_all_my_applicants(
         default=None,
         description="Scope to a single job (must be owned by the HR).",
     ),
+    limit: int = Query(default=25, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
 ) -> list[ApplicationDetail]:
     """Cross-job applicant feed for the requesting HR.
 
@@ -128,5 +144,6 @@ def list_all_my_applicants(
         stmt = stmt.where(Application.job_id == job_id)
 
     stmt = apply_filters(stmt, filters)
-    apps = db.scalars(stmt).all()
+    _set_total_header(response, db, stmt)
+    apps = db.scalars(stmt.limit(limit).offset(offset)).all()
     return [detail(a) for a in apps]

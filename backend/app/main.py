@@ -63,6 +63,11 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
+    # Non-standard response headers aren't readable by JS in cross-origin
+    # responses unless explicitly exposed. `X-Total-Count` drives the
+    # frontend's pagination footer; same-origin (nginx proxy) doesn't
+    # need this but the Vite dev server (5173 → 8000) does.
+    expose_headers=["X-Total-Count"],
 )
 
 
