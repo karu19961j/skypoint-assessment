@@ -6,7 +6,7 @@ import { dashboardApi } from "@/api/endpoints";
 import type { DashboardData } from "@/api/types";
 import { APPLICATION_STAGES } from "@/api/types";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { stageLabel } from "@/lib/format";
+import { stageColor, stageLabel } from "@/lib/format";
 
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
@@ -47,40 +47,29 @@ export function HrDashboardPage() {
         <StatCard label="Apps this week" value={data.applications.this_week} />
       </div>
 
-      {data.top_jobs.length > 0 ? (
-        <div className="card">
-          <h2 className="mb-3 text-lg font-semibold">Top 5 jobs by applications</h2>
-          <ol className="space-y-2">
-            {data.top_jobs.map((f, idx) => (
-              <li key={f.job_id} className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-sm font-semibold text-brand-700">
-                    {idx + 1}
-                  </span>
-                  <Link
-                    to={`/hr/jobs/${f.job_id}/applicants`}
-                    className="font-medium text-slate-900 hover:text-brand-700"
-                  >
-                    {f.title}
-                  </Link>
-                </div>
-                <span className="text-sm text-slate-500">
-                  {f.total} {f.total === 1 ? "applicant" : "applicants"}
-                </span>
-              </li>
-            ))}
-          </ol>
+      {/* Aggregated funnel across all the HR's jobs — quick-glance volume by stage. */}
+      <div className="card">
+        <h2 className="mb-3 text-lg font-semibold">Pipeline volume across all your jobs</h2>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
+          {APPLICATION_STAGES.map((s) => {
+            const sum = data.funnels.reduce((acc, f) => acc + (f.counts[s] ?? 0), 0);
+            return (
+              <div key={s} className={`rounded-md px-3 py-2 ${stageColor(s)}`}>
+                <div className="text-[11px] uppercase tracking-wider opacity-80">{stageLabel(s)}</div>
+                <div className="mt-0.5 text-xl font-semibold">{sum}</div>
+              </div>
+            );
+          })}
         </div>
-      ) : null}
+      </div>
 
-      <div className="card overflow-x-auto">
-        <h2 className="mb-3 text-lg font-semibold">Pipeline by job</h2>
-        {data.funnels.length === 0 ? (
-          <p className="text-slate-500">No jobs posted yet.</p>
-        ) : (
+      {data.top_jobs.length > 0 ? (
+        <div className="card overflow-x-auto">
+          <h2 className="mb-3 text-lg font-semibold">Top 5 jobs by applications</h2>
           <table className="min-w-full text-sm">
             <thead className="text-left text-xs uppercase tracking-wider text-slate-500">
               <tr>
+                <th scope="col" className="px-2 py-2">#</th>
                 <th scope="col" className="px-2 py-2">Job</th>
                 {APPLICATION_STAGES.map((s) => (
                   <th scope="col" key={s} className="px-2 py-2 text-center">{stageLabel(s)}</th>
@@ -89,8 +78,9 @@ export function HrDashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {data.funnels.map((f) => (
+              {data.top_jobs.map((f, idx) => (
                 <tr key={f.job_id}>
+                  <td className="px-2 py-2 font-mono text-xs text-slate-500">{idx + 1}</td>
                   <td className="px-2 py-2">
                     <Link to={`/hr/jobs/${f.job_id}/applicants`} className="font-medium text-slate-900 hover:text-brand-700">
                       {f.title}
@@ -106,8 +96,10 @@ export function HrDashboardPage() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="card text-slate-500">No jobs posted yet.</div>
+      )}
     </div>
   );
 }
