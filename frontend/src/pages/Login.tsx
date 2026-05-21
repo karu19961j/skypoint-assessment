@@ -1,12 +1,14 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { z } from "zod";
 
 import { ApiError } from "@/api/client";
 import { useAuth } from "@/auth/useAuth";
+import { AuthCard } from "@/components/AuthCard";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { TextField } from "@/components/TextField";
 
 const schema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -40,75 +42,53 @@ export function LoginPage() {
   });
 
   return (
-    <div className="mx-auto mt-12 max-w-md">
-      <div className="card">
-        <h1 className="mb-1 text-xl font-semibold">Welcome back</h1>
-        <p className="mb-1 text-sm text-slate-500">Log in to manage jobs or applications.</p>
-        <p className="mb-4 text-xs text-slate-500">
-          Fields marked <span className="text-rose-600">*</span> are required.
-        </p>
-
+    <>
+      <AuthCard
+        title="Welcome back"
+        intro="Log in to manage jobs or applications."
+        altText="No account?"
+        altLinkLabel="Create one"
+        altLinkTo="/register"
+      >
         <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <ErrorBanner message={error} />
-          <div>
-            <label className="label" htmlFor="login-email">
-              Email <span aria-hidden="true" className="text-rose-600">*</span>
-              <span className="sr-only"> (required)</span>
-            </label>
-            <input
-              id="login-email"
-              type="email"
-              autoComplete="email"
-              className="input"
-              aria-required="true"
-              aria-invalid={errors.email ? "true" : undefined}
-              aria-describedby={errors.email ? "login-email-error" : undefined}
-              {...register("email")}
-            />
-            {errors.email && (
-              <p id="login-email-error" role="alert" className="mt-1 text-xs text-rose-600">
-                {errors.email.message}
-              </p>
-            )}
-          </div>
-          <div>
-            <label className="label" htmlFor="login-password">
-              Password <span aria-hidden="true" className="text-rose-600">*</span>
-              <span className="sr-only"> (required)</span>
-            </label>
-            <input
-              id="login-password"
-              type="password"
-              autoComplete="current-password"
-              className="input"
-              aria-required="true"
-              aria-invalid={errors.password ? "true" : undefined}
-              aria-describedby={errors.password ? "login-password-error" : undefined}
-              {...register("password")}
-            />
-            {errors.password && (
-              <p id="login-password-error" role="alert" className="mt-1 text-xs text-rose-600">
-                {errors.password.message}
-              </p>
-            )}
-          </div>
+          <TextField
+            id="login-email"
+            label="Email"
+            type="email"
+            autoComplete="email"
+            required
+            error={errors.email?.message}
+            {...register("email")}
+          />
+          <TextField
+            id="login-password"
+            label="Password"
+            type="password"
+            autoComplete="current-password"
+            required
+            error={errors.password?.message}
+            {...register("password")}
+          />
           <button type="submit" className="btn-primary w-full" disabled={isSubmitting}>
             {isSubmitting ? "Signing in…" : "Sign in"}
           </button>
         </form>
-
-        <p className="mt-4 text-center text-sm text-slate-500">
-          No account?{" "}
-          <Link to="/register" className="text-brand-600 hover:underline">
-            Create one
-          </Link>
-        </p>
+      </AuthCard>
+      <div className="mx-auto mt-4 max-w-md">
+        <div className="card text-xs text-slate-500">
+          <p className="mb-2 font-semibold text-slate-700">Demo credentials</p>
+          <p>
+            HR — <code className="rounded bg-slate-100 px-1">hr@test.com</code> /{" "}
+            <code className="rounded bg-slate-100 px-1">Hr@1234</code>
+          </p>
+          <p>
+            Candidate —{" "}
+            <code className="rounded bg-slate-100 px-1">candidate@test.com</code> /{" "}
+            <code className="rounded bg-slate-100 px-1">Candidate@1234</code>
+          </p>
+        </div>
       </div>
-      <div className="card mt-4 text-xs text-slate-500">
-        <p className="mb-2 font-semibold text-slate-700">Demo credentials</p>
-        <p>HR — <code className="rounded bg-slate-100 px-1">hr@test.com</code> / <code className="rounded bg-slate-100 px-1">Hr@1234</code></p>
-        <p>Candidate — <code className="rounded bg-slate-100 px-1">candidate@test.com</code> / <code className="rounded bg-slate-100 px-1">Candidate@1234</code></p>
-      </div>
-    </div>
+    </>
   );
 }
