@@ -50,6 +50,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Check .env.example drift
+        # Catches the "added a new Settings field but forgot to document
+        # it" failure mode before a fresh checkout breaks on `docker
+        # compose up`.
+        run: python scripts/check_env_example.py
+
       - name: Run pytest
         working-directory: backend
         run: pytest
