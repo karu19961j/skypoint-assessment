@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.tests.conftest import (
+    apply_with_profile,  # noqa: F401 — re-exported for ad-hoc tests
     auth_headers,
     register_user,
     sample_application_payload,
@@ -195,6 +196,70 @@ def test_application_detail_lists_allowed_next_stages(
     body = resp.json()
     # Screening can step back to Applied, forward to Interview, or Rejected.
     assert set(body["allowed_next_stages"]) == {"applied", "interview", "rejected"}
+
+
+def test_application_detail_includes_profile_snapshot(
+    client: TestClient, hr_headers: dict, candidate_headers: dict
+) -> None:
+    """Apply snapshots the candidate's profile_snapshot (fresher flag +
+    experience + education JSONB) onto the row; the identity-bearing
+    detail endpoint surfaces it so the HR drawer can render the
+    candidate's history.
+
+    List endpoints anonymize the snapshot to null (it's identity-bearing
+    — company + institution + role can identify someone)."""
+    job_id = _create_job(client, hr_headers)
+
+    # The autouse fixture left a default profile; PUT a richer one so the
+    # snapshot has real content to render.
+    seed_candidate_profile(
+        client,
+        candidate_headers,
+        experiences=[
+            {
+                "company": "Acme Corp",
+                "role": "Senior Engineer",
+                "from_date": "2021-03-01",
+                "to_date": None,
+                "is_current": True,
+                "description": "Built APIs.",
+            }
+        ],
+        educations=[
+            {
+                "institution": "IIT Bombay",
+                "degree": "B.Tech",
+                "field_of_study": "Computer Science",
+                "from_year": 2016,
+                "to_year": 2020,
+            }
+        ],
+    )
+    app = client.post(
+        "/api/applications/",
+        json=sample_application_payload(job_id),
+        headers=candidate_headers,
+    ).json()
+
+    # Detail endpoint (identity-bearing) → snapshot populated.
+    detail = client.get(
+        f"/api/applications/{app['id']}", headers=hr_headers
+    ).json()
+    snapshot = detail["profile_snapshot"]
+    assert snapshot is not None
+    assert snapshot["is_fresher"] is False
+    assert len(snapshot["experiences"]) == 1
+    assert snapshot["experiences"][0]["company"] == "Acme Corp"
+    assert snapshot["experiences"][0]["is_current"] is True
+    assert len(snapshot["educations"]) == 1
+    assert snapshot["educations"][0]["institution"] == "IIT Bombay"
+
+    # List endpoint (anonymized) → snapshot stripped to null.
+    listed = client.get(
+        f"/api/applications/by-job/{job_id}", headers=hr_headers
+    ).json()
+    assert len(listed) == 1
+    assert listed[0]["profile_snapshot"] is None
 
 
 def test_cannot_transition_out_of_terminal_stage(
