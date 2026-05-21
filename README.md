@@ -27,24 +27,29 @@ The codebase aims to demonstrate clean separation of concerns, input validation 
  │   (React SPA)    │         │   nginx :80       │         │   FastAPI :8000   │
  │                  │         │   serves /        │         │   /api/*          │
  │                  │         │   proxies /api/*  │         │                   │
- └──────────────────┘         └───────────────────┘         └─────────┬─────────┘
-        host :5173                                                    │
-                                                                       ▼
-                                                          ┌──────────────────────┐
-                                                          │  postgres :5432       │
-                                                          │  (named volume)       │
-                                                          └──────────────────────┘
+ └──────────────────┘         └───────────────────┘         └────┬──────────────┘
+        host :5173                                               │
+                                          ┌────────────────┐     │
+                                          │ postgres :5432 │◀────┤
+                                          │ (pgdata vol)   │     │
+                                          └────────────────┘     │
+                                          ┌────────────────┐     │
+                                          │ minio   :9000  │◀────┘
+                                          │ (S3-compat,    │
+                                          │  miniodata vol)│
+                                          └────────────────┘
 ```
 
-Three Docker services on a private bridge network:
+Four Docker services on a private bridge network:
 
-| Service     | Image / build              | Purpose                                                                                |
-|-------------|----------------------------|----------------------------------------------------------------------------------------|
-| `postgres`  | `postgres:16-alpine`       | Persistent storage (named volume `pgdata`).                                            |
-| `backend`   | `./backend` (FastAPI)      | REST API at `/api/*`. Bootstraps schema + seed on startup. Internal-only (not exposed).|
-| `frontend`  | `./frontend` (multi-stage) | Vite builds the React app; nginx serves the static bundle and proxies `/api/*` to the backend service over the Docker network. |
+| Service     | Image / build                          | Purpose                                                                                |
+|-------------|----------------------------------------|----------------------------------------------------------------------------------------|
+| `postgres`  | `postgres:16-alpine`                   | Persistent storage (named volume `pgdata`).                                            |
+| `minio`     | `minio/minio:RELEASE.2024-11-07T…`     | S3-compatible object storage for resume files (named volume `miniodata`). Reached only by the backend over the docker network — no host port mapping. |
+| `backend`   | `./backend` (FastAPI)                  | REST API at `/api/*`. Bootstraps schema + MinIO bucket + seed on startup. Internal-only (not exposed). |
+| `frontend`  | `./frontend` (multi-stage)             | Vite builds the React app; nginx serves the static bundle and proxies `/api/*` to the backend service over the Docker network. |
 
-Only the frontend is exposed to the host (port `5173 → 80`). All backend traffic — including from the browser — flows through nginx, so the browser only ever speaks to one origin.
+Only the frontend is exposed to the host (port `5173 → 80`). All backend traffic — including from the browser — flows through nginx, so the browser only ever speaks to one origin. Resume uploads/downloads stream through FastAPI (backend ↔ MinIO over the docker network), which keeps MinIO off the browser CORS surface and makes the same boto3 code work against AWS S3 in production.
 
 Auth uses short-lived JWTs (HS256, 30-minute expiry); the secret is read from `JWT_SECRET` in the environment. Passwords are stored as bcrypt hashes (cost factor 12).
 
@@ -56,14 +61,26 @@ Auth uses short-lived JWTs (HS256, 30-minute expiry); the secret is read from `J
 git clone git@github.com:karu19961j/skypoint-assessment.git
 cd skypoint-assessment
 cp .env.example .env
+```
+
+Open `.env` in your editor and replace every `replace-with-…` placeholder with a real value before booting:
+
+- `POSTGRES_PASSWORD` — any strong string; the postgres container creates the role with it on first boot.
+- `JWT_SECRET` — a 32+ char random string. Generate one with `openssl rand -hex 32`.
+- `DATABASE_URL` — re-paste the same `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` you chose above into the URL so the backend connects to the role the postgres container actually created.
+- `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` — boot the MinIO admin account. The same values go into `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` (the backend reuses the root credentials in the demo; production would provision a scoped service user).
+
+The seed credentials (`SEED_HR_PASSWORD`, `SEED_CANDIDATE_PASSWORD`) are pre-filled with the demo logins the README documents below; leave them as-is unless you want different demo accounts.
+
+Then bring up the stack:
+
+```bash
 docker compose up --build
 ```
 
-Then open **http://localhost:5173** in your browser.
+Open **http://localhost:5173** in your browser.
 
 The backend waits for Postgres' health check, runs `Base.metadata.create_all` to set up the schema, and idempotently seeds the demo data on every startup. The whole stack is ready when you see `Application startup complete.` in the backend logs.
-
-> No additional setup is required. All configuration lives in `.env`; the committed `.env.example` documents every value and ships with sample placeholders (tagged `replace-with-…`) that still boot the stack out of the box — swap them for real values before any non-local use.
 
 To stop and remove data:
 
@@ -97,7 +114,9 @@ Use the Swagger UI to try endpoints directly — paste an `Authorization: Bearer
 | `PATCH`  | `/api/jobs/{id}/status`                    | HR (owner)  | Active / Paused / Closed.                                               |
 | `POST`   | `/api/jobs/{id}/close`                     | HR (owner)  | Soft delete — flips status to Closed, preserves applications.           |
 | `GET`    | `/api/applications/mine`                   | candidate   | Candidate's own applications.                                           |
-| `POST`   | `/api/applications/`                       | candidate   | Apply to a job.                                                         |
+| `POST`   | `/api/applications/`                       | candidate   | Apply to a job (resume_key from the upload endpoint, optional).         |
+| `POST`   | `/api/resume/upload`                       | candidate   | Multipart upload (PDF/DOC/DOCX, 15 MB max). Returns storage key + autofill suggestions. |
+| `GET`    | `/api/resume/{application_id}/download`    | owner       | Stream the resume back, owner-checked (candidate or the HR who owns the job). |
 | `DELETE` | `/api/applications/{id}`                   | candidate   | Withdraw (Applied stage only).                                          |
 | `GET`    | `/api/applications/{id}`                   | owner       | Full detail **including identity** — drives the Profile drawer.         |
 | `PATCH`  | `/api/applications/{id}/stage`             | HR (owner)  | Move between stages. Terminal stages lock further transitions.          |
@@ -187,6 +206,9 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 - Pydantic v2 + pydantic-settings for request schemas and env config
 - passlib + bcrypt for password hashing
 - python-jose for JWT
+- boto3 for S3-compatible object storage (MinIO in dev, real S3 in prod)
+- pypdf + python-docx for resume text extraction
+- python-multipart for streamed file uploads
 - pytest + FastAPI TestClient for tests
 
 **Frontend**
@@ -199,7 +221,8 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 
 **Database / infra**
 - PostgreSQL 16 (alpine) with a named Docker volume for persistence
-- Docker Compose orchestrating all three services with healthchecks
+- MinIO (S3-compatible object storage) with its own named Docker volume for resume binaries
+- Docker Compose orchestrating all four services with healthchecks
 - GitHub Actions CI runs the full backend test suite + frontend build on every push
 
 ---
@@ -210,7 +233,7 @@ Configuration follows a three-tier model. The application code is **source-agnos
 
 | Tier        | Source                                                                                  | What's in scope                                                                |
 |-------------|-----------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
-| **Local**   | A developer's `.env` (gitignored). `.env.example` ships obvious-sample placeholders.    | `JWT_SECRET=replace-with-…`, `POSTGRES_PASSWORD=replace-with-…`, the seeded demo passwords, Docker-network URLs. |
+| **Local**   | A developer's `.env` (gitignored). `.env.example` ships obvious-sample placeholders.    | `JWT_SECRET=replace-with-…`, `POSTGRES_PASSWORD=replace-with-…`, `MINIO_ROOT_PASSWORD=replace-with-…`, the seeded demo passwords, Docker-network URLs. |
 | **CI**      | GitHub Actions secrets, injected as env vars by the workflow.                            | A real `JWT_SECRET` per branch; `pytest` against a Postgres service container. |
 | **Prod**    | A real secrets manager (Vault, AWS Secrets Manager, GCP Secret Manager).                 | Rotated `JWT_SECRET`, DB credentials, etc.                                     |
 
@@ -297,6 +320,8 @@ skypoint-assessment/
 
 These were added on top of the brief's checklist to make the app more memorable:
 
+- **Resume upload to S3-compatible storage with parser-driven autofill.** Apply form swaps the "paste a URL" field for a real file picker (PDF / DOC / DOCX, 15 MB cap). The upload streams through FastAPI into MinIO (same boto3 calls work against AWS S3 in prod, only the endpoint changes — see `backend/app/services/storage.py`). On the way through, the backend extracts text (pypdf for PDF, python-docx for DOCX), stores it on the row so HR's keyword search hits cover note + skill tags **and** resume body, and returns autofill suggestions: matched skills cross-referenced against the job's required-skills list (so we suggest the right vocabulary, not every tech term in the document) plus a best-effort years-of-experience guess. The form shows a "Pre-filled from your resume — please review" banner so the candidate never wonders where the values came from.
+- **HR download with owner-checked streaming.** Profile drawer shows the original filename + size and offers a one-click download that streams from MinIO through FastAPI with `Content-Disposition: attachment`. The drawer never gets a presigned URL or an MinIO origin — the browser only ever speaks to `/api`, so swapping MinIO for AWS S3 changes one config line, not the frontend.
 - **AI candidate ranking.** `GET /api/applications/by-job/{id}/ranked` scores every applicant against the job requirements on a pure-logic 0–100 scale: 50 pts skill overlap, 30 pts experience fit, 20 pts CTC alignment, +5 pts immediate-joiner bonus, with deterministic decay curves outside each band (see `backend/app/services/ranking.py`). The HR applicants table has a **Rank by fit score** toggle that switches to ranked-mode, surfaces a `XX/100` badge per row with a tooltip showing the full breakdown, and highlights matching skills in green. No LLM, no external API — fully testable.
 - **Smart job recommendations for candidates.** Candidates save a profile (skills, experience, expected CTC, preferred location); the same scoring engine, mirrored, ranks every active job against that profile and adds a +10 location bonus when the preference matches. `GET /api/jobs/recommended`; the candidate **Browse** page has an "All jobs" / "Recommended" tab, and the Recommended view renders a fit-score badge on each job card.
 - **Cross-job candidate inbox for HR.** `/hr/applicants` rolls up every applicant on every job the HR owns into one screen with per-stage counters that double as filter buttons, plus the full filter surface from the per-job view and a "Filter by job" dropdown. The backend endpoint (`GET /api/applications/all`) is HR-scoped at the SQL level via a subquery, so an HR can never see applications on jobs they don't own.
@@ -314,7 +339,7 @@ These were added on top of the brief's checklist to make the app more memorable:
 ## 12. Known limitations & future improvements
 
 - **Schema bootstrap uses `Base.metadata.create_all`** rather than Alembic migrations. Adequate for a fresh-volume assessment; a real production deployment would add Alembic for ordered schema evolution.
-- **Resume is a link, not a file upload.** Avoids object-storage / S3 setup. Candidates paste a URL (e.g. Google Drive, Dropbox, personal site).
+- **Legacy `.doc` resumes upload + download but skip text extraction.** Binary `.doc` parsing needs heavyweight system deps (antiword/textract); we accept the format so a candidate with an older Word file isn't blocked, but those uploads won't autofill the apply form or surface in HR keyword search. `.pdf` and `.docx` get the full pipeline.
 - **JWT only — no refresh tokens.** A session lasts 30 minutes; afterwards the user logs in again. Sufficient for the demo, not for production UX.
 - **No rate limiting / lockout** on the auth endpoints. Production would add nginx rate-limit zones or a per-IP throttle in FastAPI.
 - **Single HR user** owns the seeded jobs. Multi-HR collaboration on the same job (shared pipelines) is not modelled; each job is owned by one HR.
