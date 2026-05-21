@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 
 import { App } from "./App";
+import "./env"; // runs the zod schema at module-load; throws on bad config
 import "./index.css";
 
 const root = document.getElementById("root");

@@ -204,7 +204,27 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 
 ---
 
-## 7. Security notes
+## 7. Configuration & Secrets
+
+Configuration follows a three-tier model. The application code is **source-agnostic** — it reads from the process environment via `pydantic-settings` and doesn't care who put the values there.
+
+| Tier        | Source                                                                                  | What's in scope                                                                |
+|-------------|-----------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
+| **Local**   | A developer's `.env` (gitignored). `.env.example` ships safe defaults.                  | `JWT_SECRET=assessment-only-…`, the seeded passwords, Docker-network URLs.    |
+| **CI**      | GitHub Actions secrets, injected as env vars by the workflow.                            | A real `JWT_SECRET` per branch; `pytest` against a Postgres service container. |
+| **Prod**    | A real secrets manager (Vault, AWS Secrets Manager, GCP Secret Manager).                 | Rotated `JWT_SECRET`, DB credentials, etc.                                     |
+
+Swapping tier 1 for tier 3 changes the deployment manifest, never the application code.
+
+Guard rails:
+
+- **`backend/app/config.py`** — every secret field is typed as `SecretStr` so the value never appears in repr/logs by accident. `extra="forbid"` rejects misspelled env vars (`JWT_EXPIRY_MINUTES` would otherwise silently fall back to the default). `app_env: Literal["development", "test", "production"]` and bounded validators (`jwt_expires_minutes: Field(ge=1, le=1440)`) keep ops from setting a 100-year JWT TTL. `assert_production_ready()` refuses to boot when the JWT secret looks like a placeholder; in `production` mode it additionally enforces a 32-char minimum.
+- **`docker-compose.yml`** — every required env var uses the `${VAR:?required}` form. `docker compose up` fails with a clear message instead of silently passing through an empty value.
+- **`scripts/check_env_example.py`** — fails CI if `.env.example` has drifted from `app/config.py`'s Settings or from the env vars referenced in `docker-compose.yml`. Run locally with `python scripts/check_env_example.py`.
+- **`.pre-commit-config.yaml`** — gitleaks scans every commit for accidentally-staged credentials; the same env-drift script also runs as a hook. Install with `pre-commit install` after cloning.
+- **`frontend/src/env.ts`** — `import.meta.env` is parsed through a zod schema at build time. A missing/mistyped `VITE_*` value blows up the build with a clear error instead of landing in the bundle as `undefined`.
+
+## 8. Security notes
 
 - Passwords are stored as bcrypt hashes; the configured cost factor matches passlib's `bcrypt__default_rounds`.
 - JWTs are HS256, signed with `JWT_SECRET` from the environment, and expire after 30 minutes. The app **refuses to boot** when `JWT_SECRET` is a known placeholder value (`change-me`, the comment-marker default, etc.) — set a real secret with `openssl rand -hex 32` before any non-local deployment.
@@ -220,7 +240,7 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 
 ---
 
-## 8. Accessibility
+## 9. Accessibility
 
 - Semantic landmarks: `<header>`, `<nav>`, `<main>`, `<aside>` separate the regions of every page.
 - Every form input has an associated `<label htmlFor="…">`; error messages are wired up next to the field they describe.
@@ -231,7 +251,7 @@ The HR user owns five sample jobs and the candidate has two seeded applications 
 
 ---
 
-## 9. Repository layout
+## 10. Repository layout
 
 ```
 skypoint-assessment/
@@ -273,7 +293,7 @@ skypoint-assessment/
 
 ---
 
-## 10. Standout features beyond the brief
+## 11. Standout features beyond the brief
 
 These were added on top of the brief's checklist to make the app more memorable:
 
@@ -291,7 +311,7 @@ These were added on top of the brief's checklist to make the app more memorable:
 
 ---
 
-## 11. Known limitations & future improvements
+## 12. Known limitations & future improvements
 
 - **Schema bootstrap uses `Base.metadata.create_all`** rather than Alembic migrations. Adequate for a fresh-volume assessment; a real production deployment would add Alembic for ordered schema evolution.
 - **Resume is a link, not a file upload.** Avoids object-storage / S3 setup. Candidates paste a URL (e.g. Google Drive, Dropbox, personal site).
