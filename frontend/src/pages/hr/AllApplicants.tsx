@@ -17,6 +17,7 @@ import {
   type ApplicantFilterForm,
 } from "@/lib/applicantFilters";
 import { useApplicants } from "@/lib/useApplicants";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
 
 interface FilterForm extends ApplicantFilterForm {
   job_id: string;
@@ -31,13 +32,19 @@ export function HrAllApplicantsPage() {
   const [notesFor, setNotesFor] = useState<Application | null>(null);
   const [page, setPage] = useState(1);
 
-  const apiFilters = useMemo(() => crossJobFiltersToApi(filters), [filters]);
+  // Debounce the whole filter object before it hits React Query. The
+  // sidebar inputs stay snappy; the API call lags by 300ms.
+  const debouncedFilters = useDebouncedValue(filters, 300);
+  const apiFilters = useMemo(
+    () => crossJobFiltersToApi(debouncedFilters),
+    [debouncedFilters],
+  );
   const paginatedFilters = useMemo(
     () => ({ ...apiFilters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
     [apiFilters, page],
   );
 
-  // Reset to page 1 on filter change.
+  // Reset to page 1 on (debounced) filter change.
   useEffect(() => {
     setPage(1);
   }, [apiFilters]);

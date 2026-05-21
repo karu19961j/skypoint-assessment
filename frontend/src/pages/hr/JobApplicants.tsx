@@ -16,6 +16,7 @@ import {
   EMPTY_APPLICANT_FILTERS,
   type ApplicantFilterForm,
 } from "@/lib/applicantFilters";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { notifyError } from "@/lib/toast";
 import { useApplicants } from "@/lib/useApplicants";
 
@@ -33,7 +34,15 @@ export function HrJobApplicantsPage() {
   const [ranked, setRanked] = useState(false);
   const [page, setPage] = useState(1);
 
-  const apiFilters = useMemo(() => applicantFiltersToApi(filters), [filters]);
+  // Debounce the filter object before it hits the query layer — keeps
+  // controlled inputs snappy while the API call lags at human-typing
+  // cadence. Filter clicks (chips, selects) feel immediate-enough
+  // through a 300ms delay; the keyword/number inputs benefit most.
+  const debouncedFilters = useDebouncedValue(filters, 300);
+  const apiFilters = useMemo(
+    () => applicantFiltersToApi(debouncedFilters),
+    [debouncedFilters],
+  );
   const paginatedFilters = useMemo(
     () => ({ ...apiFilters, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
     [apiFilters, page],
@@ -41,6 +50,8 @@ export function HrJobApplicantsPage() {
 
   // Any filter / mode change resets to page 1 so the user doesn't end up
   // looking at an empty page 7 of a filter set that only has 1 page.
+  // Tied to the debounced shape so we don't bounce back to page 1 on
+  // every keystroke while the user is still typing.
   useEffect(() => {
     setPage(1);
   }, [apiFilters, ranked]);

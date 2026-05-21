@@ -11,6 +11,7 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { StageBadge } from "@/components/StageBadge";
 import { formatRelative, stageLabel } from "@/lib/format";
 import { notify, notifyError } from "@/lib/toast";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
 
 export function MyApplicationsPage() {
   const queryClient = useQueryClient();
@@ -19,7 +20,10 @@ export function MyApplicationsPage() {
   const [sort, setSort] = useState<"recent" | "updated">("recent");
   const [expanded, setExpanded] = useState<number | null>(null);
 
-  const filters = { stage: stage || undefined, q: q.trim() || undefined, sort };
+  // Debounce the keyword input so typing 'data analyst' doesn't issue
+  // 11 fetches. Stage + sort are dropdown clicks — left undebounced.
+  const debouncedQ = useDebouncedValue(q.trim(), 300);
+  const filters = { stage: stage || undefined, q: debouncedQ || undefined, sort };
 
   const { data: apps = [], error, isLoading } = useQuery({
     queryKey: queryKeys.applications.mine(filters),

@@ -15,6 +15,7 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { JobCard } from "@/components/JobCard";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { TagInput } from "@/components/TagInput";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { notifyError } from "@/lib/toast";
 
 const PAGE_SIZE = 12;
@@ -72,17 +73,22 @@ export function CandidateJobsPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
+  // Debounce filters before they hit the query layer. The sidebar
+  // inputs stay snappy; the API call (and infinite-scroll cache key)
+  // lag by 300ms so typing 'react developer' doesn't fire 15 fetches.
+  const debouncedFilters = useDebouncedValue(filters, 300);
+
   // ----- All-jobs tab uses infinite scroll -----
   // React Query's useInfiniteQuery is the canonical idiom: pageParams are
   // the offsets we've fetched, `getNextPageParam` returns undefined when
-  // the backend says there's no more data. Cache keyed by filters so
-  // tab-switching back to a previous filter set is instant.
+  // the backend says there's no more data. Cache keyed by debounced
+  // filters so tab-switching back to a previous filter set is instant.
   const jobsInfinite = useInfiniteQuery({
-    queryKey: queryKeys.jobs.list(buildQuery(filters, 0)),
+    queryKey: queryKeys.jobs.list(buildQuery(debouncedFilters, 0)),
     enabled: tab === "all",
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
-      const rows = await jobsApi.list(buildQuery(filters, pageParam));
+      const rows = await jobsApi.list(buildQuery(debouncedFilters, pageParam));
       return {
         items: rows.slice(0, PAGE_SIZE),
         more: rows.length > PAGE_SIZE,
