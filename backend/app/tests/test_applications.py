@@ -134,6 +134,82 @@ def test_hr_can_only_see_own_jobs_applicants(
     assert len(resp.json()) == 1
 
 
+def test_hr_cannot_stage_move_another_hrs_application(
+    client: TestClient, hr_headers: dict, candidate_headers: dict
+) -> None:
+    my_job = _create_job(client, hr_headers)
+    app = client.post(
+        "/api/applications/",
+        json=sample_application_payload(my_job),
+        headers=candidate_headers,
+    ).json()
+
+    other_hr = register_user(
+        client, email="hr-x@example.com", password="Pass1234!", role="hr", full_name="HR X"
+    )
+
+    resp = client.patch(
+        f"/api/applications/{app['id']}/stage",
+        json={"stage": "screening"},
+        headers=auth_headers(other_hr),
+    )
+    assert resp.status_code == 403
+    # Sanity: stage didn't actually move
+    check = client.get("/api/applications/mine", headers=candidate_headers).json()
+    assert check[0]["stage"] == "applied"
+
+
+def test_all_endpoint_scopes_to_requesting_hrs_jobs(
+    client: TestClient, hr_headers: dict, candidate_headers: dict
+) -> None:
+    # HR #1 has a job + an application
+    my_job = _create_job(client, hr_headers)
+    client.post(
+        "/api/applications/",
+        json=sample_application_payload(my_job),
+        headers=candidate_headers,
+    )
+
+    # HR #2 has their own job + their own (different) application from a 2nd candidate
+    other_hr = register_user(
+        client, email="hr-y@example.com", password="Pass1234!", role="hr", full_name="HR Y"
+    )
+    other_hr_headers = auth_headers(other_hr)
+    other_job = _create_job(client, other_hr_headers)
+    other_cand = register_user(
+        client,
+        email="cand-2@example.com",
+        password="Pass1234!",
+        role="candidate",
+        full_name="C2",
+    )
+    client.post(
+        "/api/applications/",
+        json=sample_application_payload(other_job),
+        headers=auth_headers(other_cand),
+    )
+
+    # HR #1's feed: only the 1 application on their job
+    mine = client.get("/api/applications/all", headers=hr_headers).json()
+    assert {a["job_id"] for a in mine} == {my_job}
+    assert len(mine) == 1
+
+    # HR #2's feed: only their own
+    theirs = client.get("/api/applications/all", headers=other_hr_headers).json()
+    assert {a["job_id"] for a in theirs} == {other_job}
+
+    # Scoping to another HR's job_id is rejected
+    resp = client.get(
+        f"/api/applications/all?job_id={other_job}", headers=hr_headers
+    )
+    assert resp.status_code == 403
+
+
+def test_all_endpoint_is_hr_only(client: TestClient, candidate_headers: dict) -> None:
+    resp = client.get("/api/applications/all", headers=candidate_headers)
+    assert resp.status_code == 403
+
+
 def test_timeline_records_stage_transitions(
     client: TestClient, hr_headers: dict, candidate_headers: dict
 ) -> None:

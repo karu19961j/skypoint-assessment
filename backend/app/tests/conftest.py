@@ -87,10 +87,25 @@ def client(test_engine: Engine, db: Session) -> Generator[TestClient, None, None
 
 
 def register_user(client: TestClient, *, email: str, password: str, role: str, full_name: str) -> str:
-    resp = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": password, "role": role, "full_name": full_name},
-    )
+    """Register a user, temporarily allowing HR self-signup if needed.
+
+    Production blocks HR self-registration by default. Most existing tests
+    pre-date that policy, so this helper flips the setting just long enough
+    to seed both roles via the public endpoint.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    prev = settings.allow_hr_self_register
+    settings.allow_hr_self_register = True
+    try:
+        resp = client.post(
+            "/api/auth/register",
+            json={"email": email, "password": password, "role": role, "full_name": full_name},
+        )
+    finally:
+        settings.allow_hr_self_register = prev
+
     assert resp.status_code == 201, resp.text
     return resp.json()["access_token"]
 
