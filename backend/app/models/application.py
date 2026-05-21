@@ -17,6 +17,11 @@ class ApplicationStage(str, enum.Enum):
     rejected = "rejected"
 
 
+# Shared Postgres enum type: declared once so we don't try to CREATE TYPE
+# twice (Application.stage + ApplicationEvent.from_stage / to_stage).
+_application_stage_enum = Enum(ApplicationStage, name="application_stage")
+
+
 class Application(Base, TimestampMixin):
     __tablename__ = "applications"
     __table_args__ = (
@@ -38,7 +43,7 @@ class Application(Base, TimestampMixin):
     years_experience: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     skills: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     stage: Mapped[ApplicationStage] = mapped_column(
-        Enum(ApplicationStage, name="application_stage"),
+        _application_stage_enum,
         nullable=False,
         default=ApplicationStage.applied,
         index=True,
@@ -51,6 +56,12 @@ class Application(Base, TimestampMixin):
     candidate = relationship("User")
     notes = relationship(
         "ApplicationNote", back_populates="application", cascade="all, delete-orphan"
+    )
+    events = relationship(
+        "ApplicationEvent",
+        back_populates="application",
+        cascade="all, delete-orphan",
+        order_by="ApplicationEvent.created_at",
     )
 
 
@@ -68,3 +79,26 @@ class ApplicationNote(Base, TimestampMixin):
 
     application = relationship("Application", back_populates="notes")
     hr = relationship("User")
+
+
+class ApplicationEvent(Base, TimestampMixin):
+    """Immutable audit row for every stage transition (including the initial apply)."""
+
+    __tablename__ = "application_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int] = mapped_column(
+        ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    from_stage: Mapped[ApplicationStage | None] = mapped_column(
+        _application_stage_enum, nullable=True
+    )
+    to_stage: Mapped[ApplicationStage] = mapped_column(
+        _application_stage_enum, nullable=False
+    )
+    changed_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+
+    application = relationship("Application", back_populates="events")
+    changed_by = relationship("User")

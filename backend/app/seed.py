@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import (
     Application,
+    ApplicationEvent,
     ApplicationNote,
     ApplicationStage,
     EmploymentType,
@@ -206,9 +207,21 @@ def _seed_applications(
         ),
     ]
 
+    stage_progression: list[ApplicationStage] = [
+        ApplicationStage.applied,
+        ApplicationStage.screening,
+        ApplicationStage.interview,
+        ApplicationStage.offer,
+        ApplicationStage.hired,
+    ]
+
+    hr_user = db.get(User, jobs[0].hr_id) if jobs else None
+
     for s in seeds:
         candidate: User = s["candidate"]
         job: Job = s["job"]
+        final_stage: ApplicationStage = s["stage"]
+
         application = Application(
             job_id=job.id,
             candidate_id=candidate.id,
@@ -219,9 +232,32 @@ def _seed_applications(
             notice_period_days=s["notice_period_days"],
             years_experience=s["years_experience"],
             skills=s["skills"],
-            stage=s["stage"],
+            stage=final_stage,
         )
         db.add(application)
+        db.flush()
+
+        # Seed a plausible event history walking from "applied" up to the final stage.
+        if final_stage == ApplicationStage.rejected:
+            walk = [ApplicationStage.applied, ApplicationStage.rejected]
+        else:
+            walk = []
+            for stage in stage_progression:
+                walk.append(stage)
+                if stage == final_stage:
+                    break
+
+        previous: ApplicationStage | None = None
+        for stage in walk:
+            db.add(
+                ApplicationEvent(
+                    application_id=application.id,
+                    from_stage=previous,
+                    to_stage=stage,
+                    changed_by_user_id=candidate.id if previous is None else (hr_user.id if hr_user else candidate.id),
+                )
+            )
+            previous = stage
     db.commit()
 
     # One illustrative HR note on the offer-stage candidate.

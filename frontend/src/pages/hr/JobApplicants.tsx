@@ -5,6 +5,7 @@ import { ApiError } from "@/api/client";
 import { applicationsApi, jobsApi, type ApplicantFilters } from "@/api/endpoints";
 import type { Application, ApplicationNote, ApplicationStage, Job } from "@/api/types";
 import { APPLICATION_STAGES } from "@/api/types";
+import { ApplicationTimeline } from "@/components/ApplicationTimeline";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { StageBadge } from "@/components/StageBadge";
 import {
@@ -236,6 +237,7 @@ export function HrJobApplicantsPage() {
                         target="_blank"
                         rel="noreferrer"
                         className="text-xs text-brand-600 hover:underline"
+                        aria-label={`Open ${a.candidate?.full_name ?? "candidate"}'s resume in a new tab`}
                       >
                         Resume ↗
                       </a>
@@ -260,6 +262,7 @@ export function HrJobApplicantsPage() {
                           className="input py-0.5 text-xs"
                           value={a.stage}
                           onChange={(e) => setStage(a.id, e.target.value as ApplicationStage)}
+                          aria-label={`Change stage for ${a.candidate?.full_name ?? "applicant"}`}
                         >
                           {APPLICATION_STAGES.map((s) => (
                             <option key={s} value={s}>{stageLabel(s)}</option>
@@ -325,16 +328,27 @@ function NotesDrawer({ application, onClose }: { application: Application; onClo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40">
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-slate-900/40"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="notes-drawer-heading"
+    >
       <div className="w-full max-w-md overflow-y-auto bg-white p-5 shadow-xl">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Notes</h2>
+            <h2 id="notes-drawer-heading" className="text-lg font-semibold">Notes</h2>
             <p className="text-sm text-slate-500">
               About {application.candidate?.full_name ?? "candidate"} — visible to HR only.
             </p>
           </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-700">✕</button>
+          <button
+            onClick={onClose}
+            className="text-slate-500 hover:text-slate-700"
+            aria-label="Close notes drawer"
+          >
+            ✕
+          </button>
         </div>
 
         <ErrorBanner message={error} />
@@ -362,6 +376,11 @@ function NotesDrawer({ application, onClose }: { application: Application; onClo
               </div>
             ))
           )}
+        </div>
+
+        <div className="mt-6 border-t border-slate-200 pt-4">
+          <h3 className="mb-2 text-sm font-semibold text-slate-700">Stage history</h3>
+          <ApplicationTimeline applicationId={application.id} />
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { apiFetch } from "./client";
 import type {
   Application,
   ApplicationCreate,
+  ApplicationEvent,
   ApplicationNote,
   ApplicationStage,
   Bookmark,
@@ -121,6 +122,9 @@ export const applicationsApi = {
       method: "POST",
       body: { body },
     });
+  },
+  timeline(id: number) {
+    return apiFetch<ApplicationEvent[]>(`/applications/${id}/timeline`);
   },
 };
 

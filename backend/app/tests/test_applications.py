@@ -134,6 +134,81 @@ def test_hr_can_only_see_own_jobs_applicants(
     assert len(resp.json()) == 1
 
 
+def test_timeline_records_stage_transitions(
+    client: TestClient, hr_headers: dict, candidate_headers: dict
+) -> None:
+    job_id = _create_job(client, hr_headers)
+    app = client.post(
+        "/api/applications/",
+        json=sample_application_payload(job_id),
+        headers=candidate_headers,
+    ).json()
+
+    # First event is the initial apply.
+    timeline = client.get(
+        f"/api/applications/{app['id']}/timeline", headers=candidate_headers
+    ).json()
+    assert len(timeline) == 1
+    assert timeline[0]["from_stage"] is None
+    assert timeline[0]["to_stage"] == "applied"
+
+    # HR moves the application; timeline gains a second event.
+    client.patch(
+        f"/api/applications/{app['id']}/stage",
+        json={"stage": "screening"},
+        headers=hr_headers,
+    )
+    timeline = client.get(
+        f"/api/applications/{app['id']}/timeline", headers=candidate_headers
+    ).json()
+    assert [(e["from_stage"], e["to_stage"]) for e in timeline] == [
+        (None, "applied"),
+        ("applied", "screening"),
+    ]
+
+
+def test_timeline_visible_only_to_owners(
+    client: TestClient, hr_headers: dict, candidate_headers: dict
+) -> None:
+    job_id = _create_job(client, hr_headers)
+    app = client.post(
+        "/api/applications/",
+        json=sample_application_payload(job_id),
+        headers=candidate_headers,
+    ).json()
+
+    other_candidate_token = register_user(
+        client,
+        email="other.cand@example.com",
+        password="Pass1234!",
+        role="candidate",
+        full_name="Other Candidate",
+    )
+    other_hr_token = register_user(
+        client, email="hr2@example.com", password="Pass1234!", role="hr", full_name="HR Two"
+    )
+
+    # Stranger candidate gets 403.
+    resp = client.get(
+        f"/api/applications/{app['id']}/timeline",
+        headers=auth_headers(other_candidate_token),
+    )
+    assert resp.status_code == 403
+
+    # Stranger HR gets 403.
+    resp = client.get(
+        f"/api/applications/{app['id']}/timeline",
+        headers=auth_headers(other_hr_token),
+    )
+    assert resp.status_code == 403
+
+    # Owning HR sees it.
+    resp = client.get(
+        f"/api/applications/{app['id']}/timeline", headers=hr_headers
+    )
+    assert resp.status_code == 200
+
+
 def test_notes_are_hr_only(
     client: TestClient, hr_headers: dict, candidate_headers: dict
 ) -> None:

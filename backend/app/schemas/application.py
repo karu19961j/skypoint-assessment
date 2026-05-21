@@ -71,3 +71,14 @@ class ApplicationNoteOut(BaseModel):
     hr_id: int
     body: str
     created_at: datetime
+
+
+class ApplicationEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    application_id: int
+    from_stage: ApplicationStage | None
+    to_stage: ApplicationStage
+    changed_by_user_id: int
+    created_at: datetime

@@ -109,6 +109,15 @@ export interface ApplicationNote {
   created_at: string;
 }
 
+export interface ApplicationEvent {
+  id: number;
+  application_id: number;
+  from_stage: ApplicationStage | null;
+  to_stage: ApplicationStage;
+  changed_by_user_id: number;
+  created_at: string;
+}
+
 export interface Bookmark {
   id: number;
   job_id: number;

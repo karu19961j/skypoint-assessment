@@ -5,9 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.deps import CurrentUser, DbSession, require_role
+from app.deps import DbSession, require_role
 from app.models import (
     Application,
+    ApplicationEvent,
     ApplicationNote,
     ApplicationStage,
     Job,
@@ -18,6 +19,7 @@ from app.models import (
 from app.schemas.application import (
     ApplicationCreate,
     ApplicationDetail,
+    ApplicationEventOut,
     ApplicationNoteCreate,
     ApplicationNoteOut,
     ApplicationOut,
@@ -80,6 +82,16 @@ def apply(
         stage=ApplicationStage.applied,
     )
     db.add(application)
+    db.flush()  # populate application.id before inserting the event
+
+    db.add(
+        ApplicationEvent(
+            application_id=application.id,
+            from_stage=None,
+            to_stage=ApplicationStage.applied,
+            changed_by_user_id=current_user.id,
+        )
+    )
     db.commit()
     db.refresh(application)
     return ApplicationOut.model_validate(application)
@@ -215,10 +227,48 @@ def update_stage(
     app = _get_application_or_404(db, application_id)
     if app.job is None or app.job.hr_id != current_user.id:
         raise HTTPException(status_code=403, detail="You do not own this application.")
-    app.stage = payload.stage
+    if payload.stage != app.stage:
+        previous = app.stage
+        app.stage = payload.stage
+        db.add(
+            ApplicationEvent(
+                application_id=app.id,
+                from_stage=previous,
+                to_stage=payload.stage,
+                changed_by_user_id=current_user.id,
+            )
+        )
     db.commit()
     db.refresh(app)
     return _detail(app)
+
+
+@router.get("/{application_id}/timeline", response_model=list[ApplicationEventOut])
+def get_timeline(
+    application_id: int,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_role(UserRole.candidate, UserRole.hr))],
+) -> list[ApplicationEventOut]:
+    """Return the immutable stage-change history for an application.
+
+    Candidates see their own application timeline; HR sees timelines for
+    applications on the jobs they own.
+    """
+    app = _get_application_or_404(db, application_id)
+
+    if current_user.role == UserRole.candidate:
+        if app.candidate_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not your application.")
+    else:
+        if app.job is None or app.job.hr_id != current_user.id:
+            raise HTTPException(status_code=403, detail="You do not own this application.")
+
+    events = db.scalars(
+        select(ApplicationEvent)
+        .where(ApplicationEvent.application_id == application_id)
+        .order_by(ApplicationEvent.created_at.asc())
+    ).all()
+    return [ApplicationEventOut.model_validate(e) for e in events]
 
 
 @router.get("/{application_id}/notes", response_model=list[ApplicationNoteOut])
