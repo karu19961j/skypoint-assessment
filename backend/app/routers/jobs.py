@@ -23,6 +23,7 @@ from app.schemas.job import (
     RecommendedJobOut,
 )
 from app.services.ranking import score_job_for_profile
+from app.sorts import JobSort
 
 router = APIRouter()
 
@@ -56,14 +57,19 @@ def list_jobs(
     skills: list[str] | None = Query(default=None),
     job_status: JobStatus | None = Query(default=None, alias="status"),
     mine: bool = False,
-    sort: str = Query(
-        default="recent",
-        pattern="^(recent|salary_high|exp_low)$",
-        description="recent (newest), salary_high (highest salary first), exp_low (least experience required first).",
-    ),
+    sort: JobSort = JobSort.recent,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> list[JobOut]:
+    # `mine=true` only makes sense for HR — candidates never own jobs.
+    # Reject early instead of silently ignoring, which is what the previous
+    # implementation did.
+    if current_user.role == UserRole.candidate and mine:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="`mine` is an HR-only filter.",
+        )
+
     stmt = select(Job)
 
     # Candidates only see active jobs; HR can see everything.
@@ -99,9 +105,9 @@ def list_jobs(
         if normalized:
             stmt = stmt.where(Job.skills.op("&&")(normalized))
 
-    if sort == "salary_high":
+    if sort is JobSort.salary_high:
         stmt = stmt.order_by(Job.ctc_max.desc(), Job.created_at.desc())
-    elif sort == "exp_low":
+    elif sort is JobSort.exp_low:
         stmt = stmt.order_by(Job.exp_min.asc(), Job.created_at.desc())
     else:
         stmt = stmt.order_by(Job.created_at.desc())
@@ -138,14 +144,34 @@ def create_job(
     return JobOut.model_validate(job)
 
 
+# How wildly over-budget a job's salary can be (vs. candidate's expected CTC)
+# before we drop it from the candidate set before scoring. 50% slack keeps
+# "stretch" jobs reachable while pruning anything that's hopeless.
+_RECOMMEND_CTC_HEADROOM = 1.5
+
+
 @router.get("/recommended", response_model=list[RecommendedJobOut])
 def recommended_jobs(
     db: DbSession,
     current_user: Annotated[User, Depends(require_role(UserRole.candidate))],
     limit: int = Query(default=20, ge=1, le=50),
 ) -> list[RecommendedJobOut]:
-    """Score every active job against the candidate's stored profile and
-    return them sorted by fit score (descending). 404 if no profile."""
+    """Score active jobs against the candidate's profile and return them
+    sorted by fit score (descending). 404 if no profile.
+
+    Two-stage filter so we don't pay the Python scoring cost on every
+    active job in the database:
+
+    1. **SQL pre-filter** drops the obviously-bad fits using indexes that
+       already exist — skills overlap (GIN `&&`), candidate's experience
+       within ±3y of the job's band, and the job's salary ceiling not
+       wildly above the candidate's expectation.
+    2. **Python scoring** runs the full 0–100 fit calc on the survivors,
+       sorts by total desc, and slices to `limit`.
+
+    With no profile skills, the SQL pre-filter degrades to "any active
+    job" — same behaviour as before but cheaper at scale.
+    """
     profile = db.scalar(
         select(CandidateProfile).where(CandidateProfile.user_id == current_user.id)
     )
@@ -155,12 +181,29 @@ def recommended_jobs(
             detail="No candidate profile set. Save your profile to get recommendations.",
         )
 
-    active_jobs = db.scalars(
-        select(Job).where(Job.status == JobStatus.active)
-    ).all()
+    stmt = select(Job).where(Job.status == JobStatus.active)
+
+    # Skill overlap — fast on the GIN index already on Job.skills.
+    if profile.skills:
+        stmt = stmt.where(Job.skills.op("&&")(list(profile.skills)))
+
+    # Experience band overlap — keep jobs whose [min, max] band touches
+    # the candidate's years ±3 (the experience-fit scorer fully scores
+    # candidates inside the band and decays over 3y below the floor).
+    stmt = stmt.where(Job.exp_min <= profile.years_experience + 3)
+    stmt = stmt.where(Job.exp_max >= profile.years_experience - 3)
+
+    # CTC headroom — drop jobs whose ceiling is so far below the
+    # candidate's ask that the CTC component would zero out anyway.
+    if profile.expected_ctc > 0:
+        stmt = stmt.where(
+            Job.ctc_max >= int(profile.expected_ctc / _RECOMMEND_CTC_HEADROOM)
+        )
+
+    candidates = db.scalars(stmt).all()
 
     scored: list[RecommendedJobOut] = []
-    for job in active_jobs:
+    for job in candidates:
         s = score_job_for_profile(
             job_required_skills=job.skills,
             job_exp_min=job.exp_min,
@@ -245,21 +288,27 @@ def update_job_status(
     return JobOut.model_validate(job)
 
 
-@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_job(
+@router.post("/{job_id}/close", response_model=JobOut)
+def close_job(
     job_id: int,
     db: DbSession,
     current_user: Annotated[User, Depends(require_role(UserRole.hr))],
-) -> None:
-    """Soft delete: flip status to Closed instead of removing the row.
+) -> JobOut:
+    """Soft close: flip the job's status to Closed.
 
     Hard deleting would cascade into applications and notes, which would
     erase the candidate-side My Applications history. Closing the job
     instead preserves the audit trail and matches the product expectation
     that closed jobs simply disappear from the public listings but their
     pipeline remains queryable to HR.
+
+    The endpoint is `POST /jobs/:id/close` rather than `DELETE /jobs/:id`
+    because the verb should match the effect — a `DELETE` that doesn't
+    delete would surprise anyone reading the OpenAPI.
     """
     job = _get_job_or_404(db, job_id)
     _ensure_owner(job, current_user)
     job.status = JobStatus.closed
     db.commit()
+    db.refresh(job)
+    return JobOut.model_validate(job)

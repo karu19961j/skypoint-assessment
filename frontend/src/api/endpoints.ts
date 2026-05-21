@@ -80,8 +80,8 @@ export const jobsApi = {
       body: { status },
     });
   },
-  remove(id: number) {
-    return apiFetch<void>(`/jobs/${id}`, { method: "DELETE" });
+  close(id: number) {
+    return apiFetch<Job>(`/jobs/${id}/close`, { method: "POST" });
   },
   recommended() {
     return apiFetch<RecommendedJob[]>("/jobs/recommended");

@@ -73,7 +73,7 @@ def test_filters_q_and_skills(client: TestClient, hr_headers: dict, candidate_he
     assert {j["title"] for j in by_skill} == {"Python Backend Engineer"}
 
 
-def test_only_owner_can_update_or_delete_job(client: TestClient, hr_headers: dict) -> None:
+def test_only_owner_can_update_or_close_job(client: TestClient, hr_headers: dict) -> None:
     job = _create_job(client, hr_headers)
 
     other_hr_token = register_user(
@@ -86,11 +86,13 @@ def test_only_owner_can_update_or_delete_job(client: TestClient, hr_headers: dic
     )
     assert resp.status_code == 403
 
-    resp = client.delete(f"/api/jobs/{job['id']}", headers=other_headers)
+    # Soft-close endpoint replaced DELETE; verb mismatches the effect anyway.
+    resp = client.post(f"/api/jobs/{job['id']}/close", headers=other_headers)
     assert resp.status_code == 403
 
-    resp = client.delete(f"/api/jobs/{job['id']}", headers=hr_headers)
-    assert resp.status_code == 204
+    resp = client.post(f"/api/jobs/{job['id']}/close", headers=hr_headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "closed"
 
 
 def test_exp_range_validation(client: TestClient, hr_headers: dict) -> None:
