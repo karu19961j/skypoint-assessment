@@ -8,12 +8,16 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { formatRelative } from "@/lib/format";
 
 export function NotesDrawer({
-  application,
+  application: anonymized,
   onClose,
 }: {
   application: Application;
   onClose: () => void;
 }) {
+  // The application from the list view is intentionally anonymized — no
+  // name, email, or resume URL. Fetch the full detail on open so the
+  // drawer can reveal identity safely (ownership-checked on the backend).
+  const [application, setApplication] = useState<Application>(anonymized);
   const [notes, setNotes] = useState<ApplicationNote[]>([]);
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +46,19 @@ export function NotesDrawer({
 
   useEffect(() => {
     let cancelled = false;
+    // Fetch the full detail (identity + resume + cover note) for the drawer.
     applicationsApi
-      .listNotes(application.id)
+      .get(anonymized.id)
+      .then((full) => {
+        if (!cancelled) setApplication(full);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.detail : "Failed to load profile");
+      });
+
+    applicationsApi
+      .listNotes(anonymized.id)
       .then((rows) => {
         if (!cancelled) setNotes(rows);
       })
@@ -54,7 +69,7 @@ export function NotesDrawer({
     return () => {
       cancelled = true;
     };
-  }, [application.id]);
+  }, [anonymized.id]);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();

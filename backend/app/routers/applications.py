@@ -39,13 +39,29 @@ from app.services.ranking import score_application_for_job
 router = APIRouter()
 
 
-def _detail(application: Application) -> ApplicationDetail:
+def _detail(application: Application, *, include_identity: bool = False) -> ApplicationDetail:
+    """Build an ApplicationDetail payload.
+
+    `include_identity=False` (the default for list endpoints) anonymizes
+    the response: candidate.full_name / candidate.email / resume_link are
+    stripped so the HR discovery view stays bias-free even when inspected
+    via the network tab. Use `include_identity=True` only when the caller
+    is explicitly asking for the full profile (e.g. GET /applications/:id
+    powering the Profile drawer).
+    """
+    base = ApplicationOut.model_validate(application).model_dump()
+    if not include_identity:
+        # Remove the resume URL from the list payload too — it can encode
+        # candidate identity (e.g. naukri.com/alice-singh-cv).
+        base["resume_link"] = ""
     return ApplicationDetail(
-        **ApplicationOut.model_validate(application).model_dump(),
+        **base,
         job=JobMini.model_validate(application.job) if application.job else None,
-        candidate=CandidateMini.model_validate(application.candidate)
-        if application.candidate
-        else None,
+        candidate=(
+            CandidateMini.model_validate(application.candidate)
+            if include_identity and application.candidate
+            else None
+        ),
     )
 
 
@@ -211,7 +227,9 @@ def list_my_applications(
         stmt = stmt.order_by(Application.created_at.desc())
 
     apps = db.scalars(stmt).all()
-    return [_detail(a) for a in apps]
+    # `/mine` is the candidate's own application list — include identity (it's
+    # their own data) so they can see job titles + their own application detail.
+    return [_detail(a, include_identity=True) for a in apps]
 
 
 @router.delete("/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -492,6 +510,34 @@ def list_all_my_applicants(
     stmt = _apply_filters(stmt, filters)
     apps = db.scalars(stmt).all()
     return [_detail(a) for a in apps]
+
+
+@router.get("/{application_id}", response_model=ApplicationDetail)
+def get_application_detail(
+    application_id: int,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_role(UserRole.candidate, UserRole.hr))],
+) -> ApplicationDetail:
+    """Full application detail INCLUDING identity (name, email, resume).
+
+    The list endpoints (`/by-job`, `/all`, `/by-job/:id/ranked`) deliberately
+    anonymize their responses so the HR discovery surface stays bias-free
+    even at the network-tab level. This endpoint is the explicit "I'm
+    opening the profile" call — the HR clicked View Profile, or the
+    candidate is viewing their own application — and only here do we
+    return the identifying fields.
+
+    Registered after the literal /all and /by-job/... routes so FastAPI
+    matches those by exact path rather than this catch-all parameter.
+    """
+    app = _get_application_or_404(db, application_id)
+    if current_user.role == UserRole.candidate:
+        if app.candidate_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not your application.")
+    else:
+        if app.job is None or app.job.hr_id != current_user.id:
+            raise HTTPException(status_code=403, detail="You do not own this application.")
+    return _detail(app, include_identity=True)
 
 
 @router.patch("/{application_id}/stage", response_model=ApplicationDetail)

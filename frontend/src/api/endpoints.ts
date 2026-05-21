@@ -114,6 +114,12 @@ export const applicationsApi = {
   apply(payload: ApplicationCreate) {
     return apiFetch<Application>("/applications/", { method: "POST", body: payload });
   },
+  /** Full detail including candidate identity + resume URL. The list
+   *  endpoints anonymize their responses by design — use this to populate
+   *  the Profile drawer when HR clicks "View profile". */
+  get(id: number) {
+    return apiFetch<Application>(`/applications/${id}`);
+  },
   mine(filters: { stage?: ApplicationStage; q?: string; sort?: "recent" | "updated" } = {}) {
     return apiFetch<Application[]>("/applications/mine", { query: filters });
   },
