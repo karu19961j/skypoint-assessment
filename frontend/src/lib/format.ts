@@ -90,3 +90,31 @@ export function splitCsv(s: string): string[] {
     .map((x) => x.trim().toLowerCase())
     .filter(Boolean);
 }
+
+export interface DeadlineState {
+  status: "rolling" | "open" | "closing-soon" | "today" | "closed";
+  label: string;
+  daysLeft: number | null;
+}
+
+export function describeDeadline(
+  deadline: string | null | undefined,
+  now: Date = new Date(),
+): DeadlineState {
+  if (!deadline) {
+    return { status: "rolling", label: "Rolling deadline", daysLeft: null };
+  }
+  const target = new Date(deadline + "T23:59:59");
+  if (Number.isNaN(target.getTime())) {
+    return { status: "rolling", label: "Rolling deadline", daysLeft: null };
+  }
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDeadline = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+  const diffMs = startOfDeadline.getTime() - startOfToday.getTime();
+  const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+  if (days < 0) return { status: "closed", label: "Closed", daysLeft: days };
+  if (days === 0) return { status: "today", label: "Closes today", daysLeft: 0 };
+  if (days <= 3) return { status: "closing-soon", label: `Closes in ${days} day${days === 1 ? "" : "s"}`, daysLeft: days };
+  return { status: "open", label: `Closes in ${days} days`, daysLeft: days };
+}

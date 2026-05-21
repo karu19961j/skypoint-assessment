@@ -7,6 +7,7 @@ import {
   locationLabel,
 } from "@/lib/format";
 import type { Job } from "@/api/types";
+import { DeadlinePill } from "./DeadlinePill";
 
 export function JobCard({ job, onBookmarkToggle, isBookmarked }: {
   job: Job;
@@ -37,6 +38,7 @@ export function JobCard({ job, onBookmarkToggle, isBookmarked }: {
       <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
         <span className="badge bg-slate-100 text-slate-700">{formatExp(job.exp_min, job.exp_max)}</span>
         <span className="badge bg-emerald-100 text-emerald-800">{formatCtcRange(job.ctc_min, job.ctc_max)}</span>
+        <DeadlinePill deadline={job.deadline} />
         {job.skills.map((s) => (
           <span key={s} className="badge bg-brand-50 text-brand-700">
             {s}

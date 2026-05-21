@@ -7,11 +7,11 @@ import { z } from "zod";
 import { ApiError } from "@/api/client";
 import { applicationsApi, bookmarksApi, jobsApi } from "@/api/endpoints";
 import type { Job } from "@/api/types";
+import { DeadlinePill } from "@/components/DeadlinePill";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import {
   employmentLabel,
   formatCtcRange,
-  formatDate,
   formatExp,
   locationLabel,
   splitCsv,
@@ -149,11 +149,7 @@ export function CandidateJobDetailPage() {
           <span className="badge bg-emerald-100 text-emerald-800">
             {formatCtcRange(job.ctc_min, job.ctc_max)}
           </span>
-          {job.deadline ? (
-            <span className="badge bg-amber-100 text-amber-800">
-              Apply by {formatDate(job.deadline)}
-            </span>
-          ) : null}
+          <DeadlinePill deadline={job.deadline} />
           {job.skills.map((s) => (
             <span key={s} className="badge bg-brand-50 text-brand-700">
               {s}
