@@ -1,11 +1,14 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { ApiError, downloadFile } from "@/api/client";
 import { applicationsApi, resumeApi } from "@/api/endpoints";
-import type { Application, ApplicationNote } from "@/api/types";
+import { queryKeys } from "@/api/queryKeys";
+import type { Application } from "@/api/types";
 import { ApplicationTimeline } from "@/components/ApplicationTimeline";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { formatRelative } from "@/lib/format";
+import { notify, notifyError } from "@/lib/toast";
 
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -22,20 +25,15 @@ export function NotesDrawer({
   application: Application;
   onClose: () => void;
 }) {
-  // The application from the list view is intentionally anonymized — no
-  // name, email, or resume URL. Fetch the full detail on open so the
-  // drawer can reveal identity safely (ownership-checked on the backend).
-  const [application, setApplication] = useState<Application>(anonymized);
-  const [notes, setNotes] = useState<ApplicationNote[]>([]);
+  const queryClient = useQueryClient();
   const [body, setBody] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // Download is a one-shot side effect — surface failures as inline
+  // error since the toast might be missed if the user is reading the drawer.
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
 
-  // Close on Escape + move focus to the close button on open + restore
-  // focus to the previously-focused element on close. This is the minimum
-  // viable "trap" for an a11y-compliant dialog without pulling in focus-trap-react.
+  // Close on Escape + focus management. Standard drawer a11y bits.
   useEffect(() => {
     previouslyFocused.current = document.activeElement as HTMLElement | null;
     closeButtonRef.current?.focus();
@@ -52,48 +50,43 @@ export function NotesDrawer({
     };
   }, [onClose]);
 
-  useEffect(() => {
-    let cancelled = false;
-    // Fetch the full detail (identity + resume + cover note) for the drawer.
-    applicationsApi
-      .get(anonymized.id)
-      .then((full) => {
-        if (!cancelled) setApplication(full);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof ApiError ? err.detail : "Failed to load profile");
-      });
+  // Full identity-bearing detail. The list-payload `anonymized` is the
+  // fallback while the query is in-flight so the drawer renders
+  // immediately on open.
+  const detailQuery = useQuery({
+    queryKey: queryKeys.applications.detail(anonymized.id),
+    queryFn: () => applicationsApi.get(anonymized.id),
+  });
+  const application = detailQuery.data ?? anonymized;
 
-    applicationsApi
-      .listNotes(anonymized.id)
-      .then((rows) => {
-        if (!cancelled) setNotes(rows);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof ApiError ? err.detail : "Failed to load notes");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [anonymized.id]);
+  const notesQuery = useQuery({
+    queryKey: queryKeys.applications.notes(anonymized.id),
+    queryFn: () => applicationsApi.listNotes(anonymized.id),
+  });
+  const notes = notesQuery.data ?? [];
 
-  const add = async (e: React.FormEvent) => {
+  const addNoteMutation = useMutation({
+    mutationFn: (text: string) => applicationsApi.addNote(application.id, text),
+    onSuccess: () => {
+      setBody("");
+      queryClient.invalidateQueries({ queryKey: queryKeys.applications.notes(application.id) });
+      notify.success("Note added.");
+    },
+    onError: (err) => notifyError(err, "Could not save note"),
+  });
+
+  const add = (e: React.FormEvent) => {
     e.preventDefault();
     if (!body.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const note = await applicationsApi.addNote(application.id, body.trim());
-      setNotes((prev) => [note, ...prev]);
-      setBody("");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Failed to save");
-    } finally {
-      setSaving(false);
-    }
+    addNoteMutation.mutate(body.trim());
   };
+
+  const loadError =
+    detailQuery.error instanceof Error
+      ? detailQuery.error.message
+      : notesQuery.error instanceof Error
+        ? notesQuery.error.message
+        : null;
 
   return (
     <div
@@ -162,7 +155,7 @@ export function NotesDrawer({
               type="button"
               className="btn-secondary text-xs"
               onClick={async () => {
-                setError(null);
+                setDownloadError(null);
                 try {
                   await downloadFile(
                     resumeApi.downloadPath(application.id),
@@ -170,7 +163,9 @@ export function NotesDrawer({
                     application.resume?.filename ?? "resume",
                   );
                 } catch (err) {
-                  setError(err instanceof ApiError ? err.detail : "Download failed");
+                  setDownloadError(
+                    err instanceof ApiError ? err.detail : "Download failed",
+                  );
                 }
               }}
               aria-label={`Download ${application.candidate?.full_name ?? "candidate"}'s resume`}
@@ -197,7 +192,7 @@ export function NotesDrawer({
           </details>
         ) : null}
 
-        <ErrorBanner message={error} />
+        <ErrorBanner message={downloadError ?? loadError} />
 
         <form onSubmit={add} className="mt-4 space-y-2">
           <label className="label" htmlFor="note-body">
@@ -213,9 +208,9 @@ export function NotesDrawer({
           <button
             type="submit"
             className="btn-primary text-sm"
-            disabled={saving || !body.trim()}
+            disabled={addNoteMutation.isPending || !body.trim()}
           >
-            {saving ? "Saving…" : "Add note"}
+            {addNoteMutation.isPending ? "Saving…" : "Add note"}
           </button>
         </form>
 

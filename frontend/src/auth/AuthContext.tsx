@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useCallback,
   useEffect,
@@ -12,6 +13,7 @@ import type { TokenResponse, User } from "@/api/types";
 import { AuthContext, type AuthContextValue } from "./context";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -58,7 +60,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
-  }, []);
+    // Wipe the React Query cache so a different user signing in on the
+    // same tab doesn't see the previous account's data flash through
+    // before fresh fetches complete.
+    queryClient.clear();
+  }, [queryClient]);
 
   // When any authenticated request returns 401 (token expired / revoked),
   // surface that as a clean logout + redirect to /login.

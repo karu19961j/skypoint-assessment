@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-import { ApiError } from "@/api/client";
 import { applicationsApi } from "@/api/endpoints";
+import { queryKeys } from "@/api/queryKeys";
 import type { ApplicationEvent, ApplicationStage } from "@/api/types";
 import { formatRelative, stageColor, stageLabel } from "@/lib/format";
 
@@ -22,31 +22,19 @@ function pendingStages(events: ApplicationEvent[]): ApplicationStage[] {
 }
 
 export function ApplicationTimeline({ applicationId }: { applicationId: number }) {
-  const [events, setEvents] = useState<ApplicationEvent[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setError(null);
-    setEvents(null);
-    applicationsApi
-      .timeline(applicationId)
-      .then((rows) => {
-        if (!cancelled) setEvents(rows);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof ApiError ? err.detail : "Could not load timeline");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [applicationId]);
+  const { data: events, error, isLoading } = useQuery({
+    queryKey: queryKeys.applications.timeline(applicationId),
+    queryFn: () => applicationsApi.timeline(applicationId),
+  });
 
   if (error) {
-    return <p className="text-sm text-rose-600">{error}</p>;
+    return (
+      <p className="text-sm text-rose-600">
+        {error instanceof Error ? error.message : "Could not load timeline"}
+      </p>
+    );
   }
-  if (events === null) {
+  if (isLoading || !events) {
     return <p className="text-sm text-slate-500">Loading timeline…</p>;
   }
   if (events.length === 0) {
