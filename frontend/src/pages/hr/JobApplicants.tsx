@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { ApiError, downloadFile } from "@/api/client";
 import { applicationsApi, jobsApi } from "@/api/endpoints";
-import type { Application, Job } from "@/api/types";
+import { queryKeys } from "@/api/queryKeys";
+import type { Application } from "@/api/types";
 import { ApplicantFilterSidebar } from "@/components/applicants/FilterSidebar";
 import { ApplicantsTable } from "@/components/applicants/ApplicantsTable";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -13,13 +15,13 @@ import {
   EMPTY_APPLICANT_FILTERS,
   type ApplicantFilterForm,
 } from "@/lib/applicantFilters";
+import { notifyError } from "@/lib/toast";
 import { useApplicants } from "@/lib/useApplicants";
 
 export function HrJobApplicantsPage() {
   const { id } = useParams<{ id: string }>();
   const jobId = Number(id);
 
-  const [job, setJob] = useState<Job | null>(null);
   const [filters, setFilters] = useState<ApplicantFilterForm>(EMPTY_APPLICANT_FILTERS);
   const [notesFor, setNotesFor] = useState<Application | null>(null);
   // Ranked mode swaps the listing endpoint and decorates each row with
@@ -29,26 +31,23 @@ export function HrJobApplicantsPage() {
 
   const apiFilters = useMemo(() => applicantFiltersToApi(filters), [filters]);
 
-  useEffect(() => {
-    if (!jobId) return;
-    jobsApi
-      .get(jobId)
-      .then(setJob)
-      .catch(() => undefined);
-  }, [jobId]);
+  const jobQuery = useQuery({
+    queryKey: queryKeys.jobs.detail(jobId),
+    queryFn: () => jobsApi.get(jobId),
+    enabled: !!jobId,
+  });
 
-  // The hook owns the fetch + state + setStage; the page just decides
-  // which fetcher to use based on ranked mode.
-  const fetcher = useCallback(() => {
-    if (!jobId) return Promise.resolve([]);
-    return ranked
-      ? applicationsApi.ranked(jobId)
-      : applicationsApi.byJob(jobId, apiFilters);
-  }, [jobId, ranked, apiFilters]);
+  const queryKey = ranked
+    ? queryKeys.applications.ranked(jobId)
+    : queryKeys.applications.byJob(jobId, apiFilters);
 
   const { applicants, scoreByAppId, error, setStage, setError } = useApplicants({
-    fetcher,
-    deps: [fetcher],
+    queryKey,
+    fetcher: jobId
+      ? ranked
+        ? () => applicationsApi.ranked(jobId)
+        : () => applicationsApi.byJob(jobId, apiFilters)
+      : null,
   });
 
   const onExport = () =>
@@ -56,9 +55,10 @@ export function HrJobApplicantsPage() {
       `/applications/by-job/${jobId}/export`,
       apiFilters as Record<string, unknown>,
       `candidates-${jobId}.csv`,
-    ).catch((err) =>
-      setError(err instanceof ApiError ? err.detail : "Export failed"),
-    );
+    ).catch((err) => {
+      if (err instanceof ApiError) setError(err.detail);
+      notifyError(err, "Export failed");
+    });
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
@@ -72,7 +72,9 @@ export function HrJobApplicantsPage() {
       <section className="space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold">{job ? job.title : "Applicants"}</h1>
+            <h1 className="text-2xl font-semibold">
+              {jobQuery.data ? jobQuery.data.title : "Applicants"}
+            </h1>
             <p className="text-sm text-slate-500">
               {ranked
                 ? "Sorted by fit score against this job's requirements. Filters are not applied in ranking mode."

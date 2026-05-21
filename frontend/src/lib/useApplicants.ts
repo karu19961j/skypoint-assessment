@@ -1,105 +1,91 @@
-import { useCallback, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
-import { ApiError } from "@/api/client";
 import { applicationsApi } from "@/api/endpoints";
+import { queryKeys } from "@/api/queryKeys";
 import type {
   Application,
   ApplicationStage,
   RankedApplication,
   ScoreBreakdown,
 } from "@/api/types";
+import { notifyError } from "@/lib/toast";
 
 interface UseApplicantsOpts {
-  /** Function that fetches the current page of applicants. Pass `null` to
-   *  pause fetching (e.g. while a parent param is still loading). */
+  /** Query key for cache + invalidation. Pass the same key the parent page
+   *  uses with React Query's `queryKey` convention; on stage updates this
+   *  hook calls `invalidateQueries` with this exact key. */
+  queryKey: readonly unknown[];
+  /** Fetches the current page of applicants. Set to null to pause. */
   fetcher: (() => Promise<Application[]>) | null;
-  /** Deps that, when changed, retrigger the fetch. Same semantics as the
-   *  dependency array passed to `useEffect`. */
-  deps: ReadonlyArray<unknown>;
 }
 
 interface UseApplicantsResult {
   applicants: Application[];
-  /** Maps application id → score breakdown when the fetcher returns the
-   *  ranked endpoint shape; otherwise empty. */
   scoreByAppId: Map<number, ScoreBreakdown>;
   error: string | null;
   loading: boolean;
-  /** PATCH /stage + optimistic-merge the response into local state. */
-  setStage: (id: number, stage: ApplicationStage) => Promise<void>;
+  setStage: (id: number, stage: ApplicationStage) => void;
   setError: (msg: string | null) => void;
 }
 
 /**
  * Shared state + behaviour for the two HR applicants pages.
  *
- * Both `/hr/jobs/:id/applicants` and `/hr/applicants` used to inline the
- * same fetch/state/setStage block. Container/Presenter split: this hook
- * owns the state machine, the pages render the UI.
+ * Container/Presenter split: this hook owns React Query for fetch + stage
+ * mutation; the pages render the UI.
  *
- * The `fetcher` is the page's call into `applicationsApi.byJob/ranked/all`
- * — passing it as a function lets each page assemble the request it
- * needs (filters, job id, ranked mode) without leaking those concerns
- * into the hook.
+ * Under the hood:
+ *   - useQuery with the caller's queryKey caches the response per filter
+ *     set, so back-nav between jobs is instant.
+ *   - setStage runs through useMutation with onError → toast and on success
+ *     invalidates the SAME queryKey so the row reshapes to its new
+ *     allowed_next_stages without a full reload.
+ *   - The component still tracks its own ad-hoc `error` string for cases
+ *     where the parent wants to surface a non-network failure (e.g. CSV
+ *     export rejection). Mutation/network errors land in toasts.
  */
-export function useApplicants({ fetcher, deps }: UseApplicantsOpts): UseApplicantsResult {
-  const [applicants, setApplicants] = useState<Application[]>([]);
-  const [scoreByAppId, setScoreByAppId] = useState<Map<number, ScoreBreakdown>>(
-    () => new Map(),
-  );
+export function useApplicants({
+  queryKey,
+  fetcher,
+}: UseApplicantsOpts): UseApplicantsResult {
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
 
-  useEffect(() => {
-    if (!fetcher) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetcher()
-      .then((rows) => {
-        if (cancelled) return;
-        setApplicants(rows);
-        const scoreMap = new Map<number, ScoreBreakdown>();
-        for (const row of rows) {
-          // RankedApplication rows include a `score` field; plain
-          // Application rows don't. Index whichever we get.
-          if ("score" in row) {
-            scoreMap.set(row.id, (row as RankedApplication).score);
-          }
-        }
-        setScoreByAppId(scoreMap);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        if (err instanceof ApiError) setError(err.detail);
-        else setError("Failed to load applicants");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // The deps array is opaque to the hook; the caller knows when to refetch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  const query = useQuery({
+    queryKey,
+    queryFn: () => fetcher!(),
+    enabled: fetcher !== null,
+  });
 
-  const setStage = useCallback(
-    async (id: number, stage: ApplicationStage) => {
-      try {
-        const updated = await applicationsApi.setStage(id, stage);
-        // Merge the server response so allowed_next_stages stays in sync
-        // — a transition can reshape which stages are next legal.
-        setApplicants((prev) =>
-          prev.map((a) => (a.id === id ? { ...a, ...updated } : a)),
-        );
-      } catch (err) {
-        if (err instanceof ApiError) setError(err.detail);
-        else setError("Could not update stage");
-      }
+  const applicants = query.data ?? [];
+  const scoreByAppId = new Map<number, ScoreBreakdown>();
+  for (const row of applicants) {
+    if ("score" in row) {
+      scoreByAppId.set(row.id, (row as RankedApplication).score);
+    }
+  }
+
+  const stageMutation = useMutation({
+    mutationFn: ({ id, stage }: { id: number; stage: ApplicationStage }) =>
+      applicationsApi.setStage(id, stage),
+    onSuccess: () => {
+      // Invalidate the parent's query + every nested applications cache
+      // so timelines, drawers, and the cross-job feed pick up the change.
+      queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: queryKeys.applications.all() });
     },
-    [],
-  );
+    onError: (err) => notifyError(err, "Could not update stage"),
+  });
 
-  return { applicants, scoreByAppId, error, loading, setStage, setError };
+  const queryError = query.error instanceof Error ? query.error.message : null;
+
+  return {
+    applicants,
+    scoreByAppId,
+    error: error ?? queryError,
+    loading: query.isLoading,
+    setStage: (id, stage) => stageMutation.mutate({ id, stage }),
+    setError,
+  };
 }

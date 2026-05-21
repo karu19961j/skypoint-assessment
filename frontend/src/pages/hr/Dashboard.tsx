@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
-import { ApiError } from "@/api/client";
 import { dashboardApi } from "@/api/endpoints";
-import type { DashboardData } from "@/api/types";
+import { queryKeys } from "@/api/queryKeys";
 import { APPLICATION_STAGES } from "@/api/types";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { stageColor, stageLabel } from "@/lib/format";
@@ -18,17 +17,18 @@ function StatCard({ label, value }: { label: string; value: number }) {
 }
 
 export function HrDashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data, error, isLoading } = useQuery({
+    queryKey: queryKeys.dashboard.hr(),
+    queryFn: () => dashboardApi.hr(),
+  });
 
-  useEffect(() => {
-    dashboardApi
-      .hr()
-      .then(setData)
-      .catch((err) => setError(err instanceof ApiError ? err.detail : "Could not load dashboard"));
-  }, []);
-
-  if (!data) return <div className="text-slate-500">{error ?? "Loading…"}</div>;
+  if (!data) {
+    return (
+      <div className="text-slate-500">
+        {isLoading ? "Loading…" : error instanceof Error ? error.message : "Loading…"}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -37,7 +37,7 @@ export function HrDashboardPage() {
         <Link to="/hr/jobs/new" className="btn-primary text-sm">+ Post a job</Link>
       </div>
 
-      <ErrorBanner message={error} />
+      <ErrorBanner message={error instanceof Error ? error.message : null} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <StatCard label="Active jobs" value={data.jobs.active} />

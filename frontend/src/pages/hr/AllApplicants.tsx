@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 
 import { applicationsApi, jobsApi } from "@/api/endpoints";
-import type { Application, ApplicationStage, Job } from "@/api/types";
+import { queryKeys } from "@/api/queryKeys";
+import type { Application, ApplicationStage } from "@/api/types";
 import { APPLICATION_STAGES } from "@/api/types";
 import { ApplicantFilterSidebar } from "@/components/applicants/FilterSidebar";
 import { ApplicantsTable } from "@/components/applicants/ApplicantsTable";
@@ -20,27 +22,22 @@ interface FilterForm extends ApplicantFilterForm {
 }
 
 const EMPTY: FilterForm = { ...EMPTY_APPLICANT_FILTERS, job_id: "" };
+const MINE = { mine: true };
 
 export function HrAllApplicantsPage() {
-  const [jobs, setJobs] = useState<Job[]>([]);
   const [filters, setFilters] = useState<FilterForm>(EMPTY);
   const [notesFor, setNotesFor] = useState<Application | null>(null);
   const apiFilters = useMemo(() => crossJobFiltersToApi(filters), [filters]);
 
-  useEffect(() => {
-    jobsApi
-      .list({ mine: true })
-      .then(setJobs)
-      .catch(() => undefined);
-  }, []);
+  const jobsQuery = useQuery({
+    queryKey: queryKeys.jobs.list(MINE),
+    queryFn: () => jobsApi.list(MINE),
+  });
+  const jobs = jobsQuery.data ?? [];
 
-  const fetcher = useCallback(
-    () => applicationsApi.all(apiFilters),
-    [apiFilters],
-  );
   const { applicants, error, setStage } = useApplicants({
-    fetcher,
-    deps: [fetcher],
+    queryKey: queryKeys.applications.crossJob(apiFilters),
+    fetcher: () => applicationsApi.all(apiFilters),
   });
 
   const totals = useMemo(() => {

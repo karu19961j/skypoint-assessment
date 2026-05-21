@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 
-import { ApiError } from "@/api/client";
 import { jobsApi } from "@/api/endpoints";
-import type { Job, JobStatus } from "@/api/types";
+import { queryKeys } from "@/api/queryKeys";
+import type { JobStatus } from "@/api/types";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import {
   employmentLabel,
@@ -11,6 +11,7 @@ import {
   formatExp,
   locationLabel,
 } from "@/lib/format";
+import { notify, notifyError } from "@/lib/toast";
 
 const STATUS_COLOR: Record<JobStatus, string> = {
   active: "bg-emerald-100 text-emerald-800",
@@ -18,55 +19,43 @@ const STATUS_COLOR: Record<JobStatus, string> = {
   closed: "bg-slate-200 text-slate-700",
 };
 
+const MINE_FILTER = { mine: true };
+
 export function HrJobsListPage() {
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const refresh = () => {
-    jobsApi
-      .list({ mine: true })
-      .then(setJobs)
-      .catch((err) => setError(err instanceof ApiError ? err.detail : "Failed to load"));
-  };
+  const { data: jobs = [], error, isLoading } = useQuery({
+    queryKey: queryKeys.jobs.list(MINE_FILTER),
+    queryFn: () => jobsApi.list(MINE_FILTER),
+  });
 
-  useEffect(() => {
-    refresh();
-  }, []);
+  // After any mutation that changes a job, blow away every cached jobs
+  // query (lists + details + recommended) so the dashboard / browse /
+  // detail pages all reflect the change. React Query's prefix-match
+  // makes `["jobs"]` invalidate every nested ["jobs", …] entry.
+  const invalidateJobs = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all() });
 
-  const setStatus = async (id: number, status: JobStatus) => {
-    try {
-      await jobsApi.setStatus(id, status);
-      refresh();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not update status");
-    }
-  };
+  const setStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: JobStatus }) =>
+      jobsApi.setStatus(id, status),
+    onSuccess: invalidateJobs,
+    onError: (err) => notifyError(err, "Could not update status"),
+  });
 
-  const closeJob = async (id: number) => {
-    if (
-      !confirm(
-        "Close this job? It will be hidden from candidate listings but the application history is kept so you can still review the pipeline."
-      )
-    ) {
-      return;
-    }
-    try {
-      await jobsApi.close(id);
-      refresh();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not close job");
-    }
-  };
+  const closeMutation = useMutation({
+    mutationFn: (id: number) => jobsApi.close(id),
+    onSuccess: () => {
+      invalidateJobs();
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.hr() });
+      notify.success("Job closed.");
+    },
+    onError: (err) => notifyError(err, "Could not close job"),
+  });
 
-  const duplicate = async (id: number) => {
-    // Clone the posting into a new draft. The new job is created as Paused
-    // (status flipped post-create) so the candidate listings don't show a
-    // half-edited duplicate while HR is still tweaking the copy.
-    setError(null);
-    setDuplicatingId(id);
-    try {
+  const duplicateMutation = useMutation({
+    mutationFn: async (id: number) => {
       const source = await jobsApi.get(id);
       const draft = await jobsApi.create({
         title: `${source.title} (copy)`,
@@ -82,13 +71,26 @@ export function HrJobsListPage() {
         deadline: source.deadline,
       });
       await jobsApi.setStatus(draft.id, "paused");
+      return draft;
+    },
+    onSuccess: (draft) => {
+      invalidateJobs();
       navigate(`/hr/jobs/${draft.id}/edit`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not duplicate job");
-    } finally {
-      setDuplicatingId(null);
-    }
+    },
+    onError: (err) => notifyError(err, "Could not duplicate job"),
+  });
+
+  const closeJob = (id: number) => {
+    if (
+      !confirm(
+        "Close this job? It will be hidden from candidate listings but the application history is kept so you can still review the pipeline.",
+      )
+    )
+      return;
+    closeMutation.mutate(id);
   };
+
+  const queryError = error instanceof Error ? error.message : null;
 
   return (
     <div className="space-y-4">
@@ -97,9 +99,11 @@ export function HrJobsListPage() {
         <Link to="/hr/jobs/new" className="btn-primary text-sm">+ Post a job</Link>
       </div>
 
-      <ErrorBanner message={error} />
+      <ErrorBanner message={queryError} />
 
-      {jobs.length === 0 ? (
+      {isLoading ? (
+        <div className="card text-slate-500">Loading…</div>
+      ) : jobs.length === 0 ? (
         <div className="card text-slate-500">No jobs yet. Create your first posting.</div>
       ) : (
         jobs.map((j) => (
@@ -134,18 +138,22 @@ export function HrJobsListPage() {
                   Edit
                 </Link>
                 <button
-                  onClick={() => duplicate(j.id)}
-                  disabled={duplicatingId !== null}
+                  onClick={() => duplicateMutation.mutate(j.id)}
+                  disabled={duplicateMutation.isPending}
                   className="btn-secondary text-xs"
                   title="Create a paused copy of this posting"
                   aria-label={`Duplicate ${j.title}`}
                 >
-                  {duplicatingId === j.id ? "Duplicating…" : "⧉ Duplicate"}
+                  {duplicateMutation.isPending && duplicateMutation.variables === j.id
+                    ? "Duplicating…"
+                    : "⧉ Duplicate"}
                 </button>
                 <select
                   className="input max-w-[140px] py-1 text-xs"
                   value={j.status}
-                  onChange={(e) => setStatus(j.id, e.target.value as JobStatus)}
+                  onChange={(e) =>
+                    setStatusMutation.mutate({ id: j.id, status: e.target.value as JobStatus })
+                  }
                   aria-label={`Change status for ${j.title}`}
                 >
                   <option value="active">Active</option>
@@ -155,7 +163,7 @@ export function HrJobsListPage() {
                 <button
                   onClick={() => closeJob(j.id)}
                   className="btn-danger text-xs"
-                  disabled={j.status === "closed"}
+                  disabled={j.status === "closed" || closeMutation.isPending}
                   title={j.status === "closed" ? "Already closed" : "Close this job"}
                 >
                   Close

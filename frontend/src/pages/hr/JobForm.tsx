@@ -1,13 +1,15 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
 
-import { ApiError } from "@/api/client";
 import { jobsApi } from "@/api/endpoints";
+import { queryKeys } from "@/api/queryKeys";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { TagInput } from "@/components/TagInput";
+import { notify, notifyError } from "@/lib/toast";
 
 const schema = z
   .object({
@@ -37,16 +39,14 @@ export function HrJobFormPage() {
   const { id } = useParams<{ id?: string }>();
   const editingId = id ? Number(id) : null;
   const navigate = useNavigate();
-  const [error, setError] = useState<string | null>(null);
-  // Skills live outside react-hook-form because they're a pill-list, not a
-  // single input. Sync on load (edit) and read on submit.
+  const queryClient = useQueryClient();
   const [skills, setSkills] = useState<string[]>([]);
 
   const {
     register,
     handleSubmit,
     reset,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -63,54 +63,60 @@ export function HrJobFormPage() {
     },
   });
 
-  useEffect(() => {
-    if (editingId === null) return;
-    jobsApi
-      .get(editingId)
-      .then((j) => {
-        reset({
-          title: j.title,
-          description: j.description,
-          department: j.department,
-          location_type: j.location_type,
-          employment_type: j.employment_type,
-          exp_min: j.exp_min,
-          exp_max: j.exp_max,
-          ctc_min: j.ctc_min,
-          ctc_max: j.ctc_max,
-          deadline: j.deadline ?? "",
-        });
-        setSkills(j.skills);
-      })
-      .catch((err) => setError(err instanceof ApiError ? err.detail : "Failed to load"));
-  }, [editingId, reset]);
-
-  const onSubmit = handleSubmit(async (values) => {
-    setError(null);
-    const payload = {
-      title: values.title.trim(),
-      description: values.description,
-      department: values.department.trim(),
-      location_type: values.location_type,
-      employment_type: values.employment_type,
-      exp_min: values.exp_min,
-      exp_max: values.exp_max,
-      ctc_min: values.ctc_min,
-      ctc_max: values.ctc_max,
-      skills,
-      deadline: values.deadline ? values.deadline : null,
-    };
-    try {
-      if (editingId === null) {
-        await jobsApi.create(payload);
-      } else {
-        await jobsApi.update(editingId, payload);
-      }
-      navigate("/hr/jobs");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Failed to save");
-    }
+  const jobQuery = useQuery({
+    queryKey: editingId !== null ? queryKeys.jobs.detail(editingId) : ["jobs", "_idle"],
+    queryFn: () => jobsApi.get(editingId!),
+    enabled: editingId !== null,
   });
+
+  useEffect(() => {
+    const j = jobQuery.data;
+    if (!j) return;
+    reset({
+      title: j.title,
+      description: j.description,
+      department: j.department,
+      location_type: j.location_type,
+      employment_type: j.employment_type,
+      exp_min: j.exp_min,
+      exp_max: j.exp_max,
+      ctc_min: j.ctc_min,
+      ctc_max: j.ctc_max,
+      deadline: j.deadline ?? "",
+    });
+    setSkills(j.skills);
+  }, [jobQuery.data, reset]);
+
+  const saveMutation = useMutation({
+    mutationFn: (values: FormValues) => {
+      const payload = {
+        title: values.title.trim(),
+        description: values.description,
+        department: values.department.trim(),
+        location_type: values.location_type,
+        employment_type: values.employment_type,
+        exp_min: values.exp_min,
+        exp_max: values.exp_max,
+        ctc_min: values.ctc_min,
+        ctc_max: values.ctc_max,
+        skills,
+        deadline: values.deadline ? values.deadline : null,
+      };
+      return editingId === null
+        ? jobsApi.create(payload)
+        : jobsApi.update(editingId, payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.hr() });
+      notify.success(editingId === null ? "Job posted." : "Job updated.");
+      navigate("/hr/jobs");
+    },
+    onError: (err) => notifyError(err, "Failed to save"),
+  });
+
+  const onSubmit = handleSubmit((values) => saveMutation.mutate(values));
+  const queryError = jobQuery.error instanceof Error ? jobQuery.error.message : null;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -120,7 +126,7 @@ export function HrJobFormPage() {
       </p>
 
       <form onSubmit={onSubmit} className="card space-y-4" noValidate>
-        <ErrorBanner message={error} />
+        <ErrorBanner message={queryError} />
 
         <div>
           <label className="label" htmlFor="job-title">
@@ -285,8 +291,8 @@ export function HrJobFormPage() {
           <button type="button" onClick={() => navigate("/hr/jobs")} className="btn-secondary">
             Cancel
           </button>
-          <button type="submit" className="btn-primary" disabled={isSubmitting}>
-            {isSubmitting ? "Saving…" : editingId ? "Save changes" : "Publish job"}
+          <button type="submit" className="btn-primary" disabled={saveMutation.isPending}>
+            {saveMutation.isPending ? "Saving…" : editingId ? "Save changes" : "Publish job"}
           </button>
         </div>
       </form>
