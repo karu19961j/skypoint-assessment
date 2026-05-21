@@ -75,4 +75,11 @@ def hr_dashboard(
             entry.counts[stage] = n
             entry.total += n
 
-    return DashboardOut(jobs=counts, applications=activity, funnels=list(grouped.values()))
+    funnels = list(grouped.values())
+    top_jobs = sorted(funnels, key=lambda f: f.total, reverse=True)[:5]
+    return DashboardOut(
+        jobs=counts,
+        applications=activity,
+        funnels=funnels,
+        top_jobs=top_jobs,
+    )

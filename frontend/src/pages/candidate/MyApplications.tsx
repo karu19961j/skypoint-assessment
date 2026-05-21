@@ -14,22 +14,25 @@ export function MyApplicationsPage() {
   const [apps, setApps] = useState<Application[]>([]);
   const [stage, setStage] = useState<ApplicationStage | "">("");
   const [q, setQ] = useState("");
+  const [sort, setSort] = useState<"recent" | "updated">("recent");
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = () => {
     applicationsApi
-      .mine({ stage: stage || undefined, q: q.trim() || undefined })
+      .mine({ stage: stage || undefined, q: q.trim() || undefined, sort })
       .then(setApps)
       .catch((err) => {
         if (err instanceof ApiError) setError(err.detail);
-      });
+      })
+      .finally(() => setLoaded(true));
   };
 
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, q]);
+  }, [stage, q, sort]);
 
   const withdraw = async (id: number) => {
     if (!confirm("Withdraw this application?")) return;
@@ -51,11 +54,13 @@ export function MyApplicationsPage() {
           placeholder="Search by job title"
           value={q}
           onChange={(e) => setQ(e.target.value)}
+          aria-label="Search by job title"
         />
         <select
           className="input max-w-xs"
           value={stage}
           onChange={(e) => setStage(e.target.value as ApplicationStage | "")}
+          aria-label="Filter by stage"
         >
           <option value="">All stages</option>
           {APPLICATION_STAGES.map((s) => (
@@ -64,12 +69,38 @@ export function MyApplicationsPage() {
             </option>
           ))}
         </select>
+        <select
+          className="input max-w-xs"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as "recent" | "updated")}
+          aria-label="Sort applications"
+        >
+          <option value="recent">Recently applied</option>
+          <option value="updated">Recently updated</option>
+        </select>
       </div>
 
       <ErrorBanner message={error} />
+      <div className="sr-only" role="status" aria-live="polite">
+        {`Showing ${apps.length} ${apps.length === 1 ? "application" : "applications"}`}
+      </div>
 
       {apps.length === 0 ? (
-        <div className="card text-slate-500">No applications yet.</div>
+        loaded && !stage && !q ? (
+          <div className="card flex flex-col items-start gap-3 text-slate-600">
+            <p className="text-sm">
+              You haven&apos;t applied to anything yet. Pick a role that fits and
+              your applications will show up here with live stage updates.
+            </p>
+            <Link to="/jobs" className="btn-primary text-sm">
+              Browse jobs
+            </Link>
+          </div>
+        ) : (
+          <div className="card text-slate-500">
+            No applications match the current filters.
+          </div>
+        )
       ) : (
         <div className="overflow-hidden rounded-lg ring-1 ring-slate-200">
           <table className="min-w-full divide-y divide-slate-200 bg-white text-sm">

@@ -25,3 +25,7 @@ class DashboardOut(BaseModel):
     jobs: JobStatusCounts
     applications: ApplicationActivity
     funnels: list[JobFunnelEntry]
+    # Top 5 of the same funnels, sorted by total application count desc.
+    # Always a subset of `funnels`, surfaced separately so the UI can render
+    # "Top jobs by applications" without re-sorting client-side.
+    top_jobs: list[JobFunnelEntry]

@@ -43,12 +43,18 @@ export function HrJobsListPage() {
   };
 
   const remove = async (id: number) => {
-    if (!confirm("Delete this job? This also deletes its applications.")) return;
+    if (
+      !confirm(
+        "Close this job? It will be hidden from candidate listings but the application history is kept so you can still review the pipeline."
+      )
+    ) {
+      return;
+    }
     try {
       await jobsApi.remove(id);
       refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not delete job");
+      setError(err instanceof ApiError ? err.detail : "Could not close job");
     }
   };
 
@@ -105,8 +111,13 @@ export function HrJobsListPage() {
                   <option value="paused">Paused</option>
                   <option value="closed">Closed</option>
                 </select>
-                <button onClick={() => remove(j.id)} className="btn-danger text-xs">
-                  Delete
+                <button
+                  onClick={() => remove(j.id)}
+                  className="btn-danger text-xs"
+                  disabled={j.status === "closed"}
+                  title={j.status === "closed" ? "Already closed" : "Close this job"}
+                >
+                  Close
                 </button>
               </div>
             </div>

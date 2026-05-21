@@ -5,8 +5,24 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.deps import CurrentUser, DbSession, require_role
-from app.models import EmploymentType, Job, JobStatus, LocationType, User, UserRole
-from app.schemas.job import JobCreate, JobOut, JobStatusUpdate, JobUpdate
+from app.models import (
+    CandidateProfile,
+    EmploymentType,
+    Job,
+    JobStatus,
+    LocationType,
+    User,
+    UserRole,
+)
+from app.schemas.job import (
+    JobCreate,
+    JobOut,
+    JobScoreOut,
+    JobStatusUpdate,
+    JobUpdate,
+    RecommendedJobOut,
+)
+from app.services.ranking import score_job_for_profile
 
 router = APIRouter()
 
@@ -40,6 +56,11 @@ def list_jobs(
     skills: list[str] | None = Query(default=None),
     job_status: JobStatus | None = Query(default=None, alias="status"),
     mine: bool = False,
+    sort: str = Query(
+        default="recent",
+        pattern="^(recent|salary_high|exp_low)$",
+        description="recent (newest), salary_high (highest salary first), exp_low (least experience required first).",
+    ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> list[JobOut]:
@@ -78,7 +99,14 @@ def list_jobs(
         if normalized:
             stmt = stmt.where(Job.skills.op("&&")(normalized))
 
-    stmt = stmt.order_by(Job.created_at.desc()).limit(limit).offset(offset)
+    if sort == "salary_high":
+        stmt = stmt.order_by(Job.ctc_max.desc(), Job.created_at.desc())
+    elif sort == "exp_low":
+        stmt = stmt.order_by(Job.exp_min.asc(), Job.created_at.desc())
+    else:
+        stmt = stmt.order_by(Job.created_at.desc())
+
+    stmt = stmt.limit(limit).offset(offset)
     jobs = db.scalars(stmt).all()
     return [JobOut.model_validate(j) for j in jobs]
 
@@ -108,6 +136,61 @@ def create_job(
     db.commit()
     db.refresh(job)
     return JobOut.model_validate(job)
+
+
+@router.get("/recommended", response_model=list[RecommendedJobOut])
+def recommended_jobs(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_role(UserRole.candidate))],
+    limit: int = Query(default=20, ge=1, le=50),
+) -> list[RecommendedJobOut]:
+    """Score every active job against the candidate's stored profile and
+    return them sorted by fit score (descending). 404 if no profile."""
+    profile = db.scalar(
+        select(CandidateProfile).where(CandidateProfile.user_id == current_user.id)
+    )
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No candidate profile set. Save your profile to get recommendations.",
+        )
+
+    active_jobs = db.scalars(
+        select(Job).where(Job.status == JobStatus.active)
+    ).all()
+
+    scored: list[RecommendedJobOut] = []
+    for job in active_jobs:
+        s = score_job_for_profile(
+            job_required_skills=job.skills,
+            job_exp_min=job.exp_min,
+            job_exp_max=job.exp_max,
+            job_ctc_min=job.ctc_min,
+            job_ctc_max=job.ctc_max,
+            job_location_type=job.location_type.value,
+            profile_skills=profile.skills,
+            profile_years=profile.years_experience,
+            profile_expected_ctc=profile.expected_ctc,
+            profile_preferred_location=(
+                profile.preferred_location.value if profile.preferred_location else None
+            ),
+        )
+        scored.append(
+            RecommendedJobOut(
+                **JobOut.model_validate(job).model_dump(),
+                score=JobScoreOut(
+                    total=s.total,
+                    skill=s.skill,
+                    exp=s.exp,
+                    ctc=s.ctc,
+                    location=s.location,
+                    matched_skills=s.matched_skills,
+                ),
+            )
+        )
+
+    scored.sort(key=lambda r: r.score.total, reverse=True)
+    return scored[:limit]
 
 
 @router.get("/{job_id}", response_model=JobOut)
@@ -170,7 +253,15 @@ def delete_job(
     db: DbSession,
     current_user: Annotated[User, Depends(require_role(UserRole.hr))],
 ) -> None:
+    """Soft delete: flip status to Closed instead of removing the row.
+
+    Hard deleting would cascade into applications and notes, which would
+    erase the candidate-side My Applications history. Closing the job
+    instead preserves the audit trail and matches the product expectation
+    that closed jobs simply disappear from the public listings but their
+    pipeline remains queryable to HR.
+    """
     job = _get_job_or_404(db, job_id)
     _ensure_owner(job, current_user)
-    db.delete(job)
+    job.status = JobStatus.closed
     db.commit()

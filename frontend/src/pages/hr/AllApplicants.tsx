@@ -228,14 +228,20 @@ export function HrAllApplicantsPage() {
           />
         </div>
         <div>
-          <label className="label">Max notice (days)</label>
-          <input
+          <label className="label" htmlFor="all-notice-bucket">Notice period</label>
+          <select
+            id="all-notice-bucket"
             className="input"
-            type="number"
-            min={0}
             value={filters.notice_max_days}
             onChange={(e) => update("notice_max_days", e.target.value)}
-          />
+          >
+            <option value="">Any</option>
+            <option value="0">Immediate joiner</option>
+            <option value="15">≤ 15 days</option>
+            <option value="30">≤ 30 days</option>
+            <option value="60">≤ 60 days</option>
+            <option value="90">≤ 90 days</option>
+          </select>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -305,6 +311,10 @@ export function HrAllApplicantsPage() {
 
         <ErrorBanner message={error} />
 
+        <div className="sr-only" role="status" aria-live="polite">
+          {`Showing ${applicants.length} ${applicants.length === 1 ? "applicant" : "applicants"}`}
+        </div>
+
         {applicants.length === 0 ? (
           <div className="card text-slate-500">No applicants match these filters yet.</div>
         ) : (
@@ -312,53 +322,26 @@ export function HrAllApplicantsPage() {
             <table className="min-w-full divide-y divide-slate-200 rounded-lg bg-white text-sm ring-1 ring-slate-200">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
                 <tr>
-                  <th scope="col" className="px-3 py-2">
-                    Candidate
-                  </th>
-                  <th scope="col" className="px-3 py-2">
-                    Applied to
-                  </th>
-                  <th scope="col" className="px-3 py-2">
-                    Exp
-                  </th>
-                  <th scope="col" className="px-3 py-2">
-                    Current
-                  </th>
-                  <th scope="col" className="px-3 py-2">
-                    Expected
-                  </th>
-                  <th scope="col" className="px-3 py-2">
-                    Notice
-                  </th>
-                  <th scope="col" className="px-3 py-2">
-                    Skills
-                  </th>
-                  <th scope="col" className="px-3 py-2">
-                    Applied
-                  </th>
-                  <th scope="col" className="px-3 py-2">
-                    Stage
-                  </th>
-                  <th scope="col" className="px-3 py-2" />
+                  <th scope="col" className="px-3 py-2">Applicant</th>
+                  <th scope="col" className="px-3 py-2">Applied to</th>
+                  <th scope="col" className="px-3 py-2">Exp</th>
+                  <th scope="col" className="px-3 py-2">Current</th>
+                  <th scope="col" className="px-3 py-2">Expected</th>
+                  <th scope="col" className="px-3 py-2">Notice</th>
+                  <th scope="col" className="px-3 py-2">Skills</th>
+                  <th scope="col" className="px-3 py-2">Applied</th>
+                  <th scope="col" className="px-3 py-2">Stage</th>
+                  <th scope="col" className="px-3 py-2"><span className="sr-only">Profile</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {applicants.map((a) => (
                   <tr key={a.id}>
                     <td className="px-3 py-2">
-                      <div className="font-medium text-slate-900">
-                        {a.candidate?.full_name ?? "—"}
+                      <div className="font-medium text-slate-700">#{a.id}</div>
+                      <div className="text-xs text-slate-500">
+                        {a.years_experience}y · {a.notice_period_days}d notice
                       </div>
-                      <div className="text-xs text-slate-500">{a.candidate?.email}</div>
-                      <a
-                        href={a.resume_link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-brand-600 hover:underline"
-                        aria-label={`Open ${a.candidate?.full_name ?? "candidate"}'s resume in a new tab`}
-                      >
-                        Resume ↗
-                      </a>
                     </td>
                     <td className="px-3 py-2">
                       {a.job ? (
@@ -399,7 +382,7 @@ export function HrAllApplicantsPage() {
                           className="input py-0.5 text-xs"
                           value={a.stage}
                           onChange={(e) => setStage(a.id, e.target.value as ApplicationStage)}
-                          aria-label={`Change stage for ${a.candidate?.full_name ?? "applicant"}`}
+                          aria-label={`Change stage for applicant ${a.id}`}
                         >
                           {APPLICATION_STAGES.map((s) => (
                             <option key={s} value={s}>
@@ -413,8 +396,9 @@ export function HrAllApplicantsPage() {
                       <button
                         onClick={() => setNotesFor(a)}
                         className="text-xs text-brand-600 hover:underline"
+                        aria-label={`View profile for applicant ${a.id}`}
                       >
-                        Notes
+                        View profile
                       </button>
                     </td>
                   </tr>

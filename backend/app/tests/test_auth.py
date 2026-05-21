@@ -75,16 +75,25 @@ def test_password_min_length(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
-def test_hr_self_registration_blocked_by_default(client: TestClient) -> None:
-    resp = client.post(
-        "/api/auth/register",
-        json={
-            "email": "would-be-hr@example.com",
-            "password": "Password123!",
-            "role": "hr",
-            "full_name": "Would-be HR",
-        },
-    )
-    # The default config has allow_hr_self_register=False, so this is rejected.
+def test_hr_self_registration_can_be_disabled(client: TestClient) -> None:
+    """The demo defaults `allow_hr_self_register` to True; production
+    deployments flip it off. Verify the gate works either way."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    settings.allow_hr_self_register = False
+    try:
+        resp = client.post(
+            "/api/auth/register",
+            json={
+                "email": "would-be-hr@example.com",
+                "password": "Password123!",
+                "role": "hr",
+                "full_name": "Would-be HR",
+            },
+        )
+    finally:
+        settings.allow_hr_self_register = True
+
     assert resp.status_code == 403, resp.text
     assert "provisioned" in resp.json()["detail"].lower()

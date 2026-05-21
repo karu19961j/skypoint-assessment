@@ -2,8 +2,24 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "@/api/client";
 import { applicationsApi } from "@/api/endpoints";
-import type { ApplicationEvent } from "@/api/types";
+import type { ApplicationEvent, ApplicationStage } from "@/api/types";
 import { formatRelative, stageColor, stageLabel } from "@/lib/format";
+
+const HAPPY_PATH: ApplicationStage[] = [
+  "applied",
+  "screening",
+  "interview",
+  "offer",
+  "hired",
+];
+
+function pendingStages(events: ApplicationEvent[]): ApplicationStage[] {
+  if (events.length === 0) return HAPPY_PATH;
+  const current = events[events.length - 1].to_stage;
+  if (current === "rejected" || current === "hired") return [];
+  const idx = HAPPY_PATH.indexOf(current);
+  return idx >= 0 ? HAPPY_PATH.slice(idx + 1) : [];
+}
 
 export function ApplicationTimeline({ applicationId }: { applicationId: number }) {
   const [events, setEvents] = useState<ApplicationEvent[] | null>(null);
@@ -37,6 +53,8 @@ export function ApplicationTimeline({ applicationId }: { applicationId: number }
     return <p className="text-sm text-slate-500">No history yet.</p>;
   }
 
+  const pending = pendingStages(events);
+
   return (
     <ol className="relative space-y-3 border-l border-slate-200 pl-5">
       {events.map((event, idx) => (
@@ -64,6 +82,20 @@ export function ApplicationTimeline({ applicationId }: { applicationId: number }
           <time className="text-xs text-slate-500" dateTime={event.created_at}>
             {formatRelative(event.created_at)}
           </time>
+        </li>
+      ))}
+      {pending.map((stage) => (
+        <li key={`pending-${stage}`} className="relative opacity-60">
+          <span
+            className="absolute -left-[26px] top-1.5 inline-flex h-3 w-3 rounded-full bg-white ring-2 ring-slate-300"
+            aria-hidden="true"
+          />
+          <div className="flex items-center gap-2 text-sm">
+            <span className="badge bg-slate-100 text-slate-500">
+              {stageLabel(stage)}
+            </span>
+            <span className="text-xs text-slate-400">Pending</span>
+          </div>
         </li>
       ))}
     </ol>

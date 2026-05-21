@@ -61,3 +61,16 @@ class JobOut(JobBase):
     hr_id: int
     status: JobStatus
     created_at: datetime
+
+
+class JobScoreOut(BaseModel):
+    total: int
+    skill: int
+    exp: int
+    ctc: int
+    location: int
+    matched_skills: list[str]
+
+
+class RecommendedJobOut(JobOut):
+    score: JobScoreOut

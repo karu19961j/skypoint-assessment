@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
 import { bookmarksApi, jobsApi, type JobListFilters } from "@/api/endpoints";
-import type { EmploymentType, Job, LocationType } from "@/api/types";
+import type { EmploymentType, Job, LocationType, RecommendedJob } from "@/api/types";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { JobCard } from "@/components/JobCard";
+import { ScoreBadge } from "@/components/ScoreBadge";
 import { splitCsv } from "@/lib/format";
 
 interface Filters {
@@ -17,6 +19,7 @@ interface Filters {
   ctc_min: string;
   ctc_max: string;
   skills: string;
+  sort: "recent" | "salary_high" | "exp_low";
 }
 
 const EMPTY: Filters = {
@@ -29,10 +32,11 @@ const EMPTY: Filters = {
   ctc_min: "",
   ctc_max: "",
   skills: "",
+  sort: "recent",
 };
 
 function buildQuery(f: Filters): JobListFilters {
-  const q: JobListFilters = {};
+  const q: JobListFilters = { sort: f.sort };
   if (f.q.trim()) q.q = f.q.trim();
   if (f.location_type) q.location_type = f.location_type;
   if (f.employment_type) q.employment_type = f.employment_type;
@@ -46,28 +50,55 @@ function buildQuery(f: Filters): JobListFilters {
   return q;
 }
 
+type Tab = "all" | "recommended";
+
 export function CandidateJobsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: Tab = searchParams.get("tab") === "recommended" ? "recommended" : "all";
   const [filters, setFilters] = useState<Filters>(EMPTY);
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useState<Job[] | RecommendedJob[]>([]);
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [noProfile, setNoProfile] = useState(false);
 
   const query = useMemo(() => buildQuery(filters), [filters]);
 
   useEffect(() => {
-    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    jobsApi
-      .list(query)
-      .then((rows) => setJobs(rows))
-      .catch((err) => {
-        if (err instanceof ApiError) setError(err.detail);
-      })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [query]);
+    setNoProfile(false);
+
+    if (tab === "recommended") {
+      jobsApi
+        .recommended()
+        .then((rows) => setJobs(rows))
+        .catch((err) => {
+          if (err instanceof ApiError) {
+            if (err.status === 404) setNoProfile(true);
+            else setError(err.detail);
+          }
+        })
+        .finally(() => setLoading(false));
+    } else {
+      jobsApi
+        .list(query)
+        .then((rows) => setJobs(rows))
+        .catch((err) => {
+          if (err instanceof ApiError) setError(err.detail);
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [query, tab]);
+
+  const setTab = (next: Tab) => {
+    if (next === "all") {
+      searchParams.delete("tab");
+    } else {
+      searchParams.set("tab", "recommended");
+    }
+    setSearchParams(searchParams, { replace: true });
+  };
 
   useEffect(() => {
     bookmarksApi
@@ -198,26 +229,96 @@ export function CandidateJobsPage() {
             onChange={(e) => update("skills", e.target.value)}
           />
         </div>
+        <div>
+          <label className="label" htmlFor="browse-sort">Sort by</label>
+          <select
+            id="browse-sort"
+            className="input"
+            value={filters.sort}
+            onChange={(e) => update("sort", e.target.value as Filters["sort"])}
+          >
+            <option value="recent">Newest first</option>
+            <option value="salary_high">Highest salary first</option>
+            <option value="exp_low">Least experience required</option>
+          </select>
+        </div>
         <button onClick={() => setFilters(EMPTY)} className="btn-secondary w-full text-sm">
           Reset filters
         </button>
       </aside>
 
       <section className="space-y-3">
+        <div className="flex items-center gap-1 rounded-md bg-white p-1 ring-1 ring-slate-200" role="tablist" aria-label="Job views">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "all"}
+            onClick={() => setTab("all")}
+            className={`flex-1 rounded px-3 py-1.5 text-sm font-medium transition ${
+              tab === "all" ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            All jobs
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "recommended"}
+            onClick={() => setTab("recommended")}
+            className={`flex-1 rounded px-3 py-1.5 text-sm font-medium transition ${
+              tab === "recommended" ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            ★ Recommended
+          </button>
+        </div>
+
         <ErrorBanner message={error} />
-        {loading ? (
+        <div className="sr-only" role="status" aria-live="polite">
+          {loading
+            ? "Loading jobs"
+            : `Showing ${jobs.length} ${jobs.length === 1 ? "job" : "jobs"}`}
+        </div>
+
+        {noProfile ? (
+          <div className="card flex flex-col items-start gap-3 text-slate-600">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Tell us about yourself to see recommendations
+            </h2>
+            <p className="text-sm">
+              Add your skills, experience, CTC expectation and preferred location.
+              We&apos;ll score every active job against your profile and rank the best fits.
+            </p>
+            <Link to="/me/profile" className="btn-primary text-sm">
+              Complete your profile
+            </Link>
+          </div>
+        ) : loading ? (
           <div className="text-slate-500">Loading jobs…</div>
         ) : jobs.length === 0 ? (
-          <div className="card text-slate-500">No jobs match your filters.</div>
+          <div className="card text-slate-500">
+            {tab === "recommended"
+              ? "No active jobs match your profile right now. Check back soon!"
+              : "No jobs match your filters."}
+          </div>
         ) : (
-          jobs.map((j) => (
-            <JobCard
-              key={j.id}
-              job={j}
-              isBookmarked={bookmarkedIds.has(j.id)}
-              onBookmarkToggle={() => toggleBookmark(j.id)}
-            />
-          ))
+          jobs.map((j) => {
+            const recommended = "score" in j ? (j as RecommendedJob) : null;
+            return (
+              <div key={j.id} className="relative">
+                <JobCard
+                  job={j}
+                  isBookmarked={bookmarkedIds.has(j.id)}
+                  onBookmarkToggle={() => toggleBookmark(j.id)}
+                />
+                {recommended ? (
+                  <div className="absolute right-5 top-5">
+                    <ScoreBadge score={recommended.score} />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })
         )}
       </section>
     </div>

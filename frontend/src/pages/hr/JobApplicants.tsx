@@ -1,12 +1,47 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
-import { ApiError } from "@/api/client";
+import { ApiError, getToken } from "@/api/client";
+async function downloadExport(jobId: number, filters: ApplicantFilters) {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters)) {
+    if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) for (const item of v) sp.append(k, String(item));
+    else sp.set(k, String(v));
+  }
+  const qs = sp.toString();
+  const url = `/api/applications/by-job/${jobId}/export${qs ? `?${qs}` : ""}`;
+  const token = getToken();
+  const resp = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!resp.ok) throw new ApiError(resp.status, await resp.text());
+  const blob = await resp.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const filename =
+    resp.headers
+      .get("Content-Disposition")
+      ?.match(/filename="?([^"]+)"?/)?.[1] ?? `candidates-${jobId}.csv`;
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(objectUrl);
+}
 import { applicationsApi, jobsApi, type ApplicantFilters } from "@/api/endpoints";
-import type { Application, ApplicationStage, Job } from "@/api/types";
+import type {
+  Application,
+  ApplicationScore,
+  ApplicationStage,
+  Job,
+  RankedApplication,
+} from "@/api/types";
 import { APPLICATION_STAGES } from "@/api/types";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NotesDrawer } from "@/components/NotesDrawer";
+import { ScoreBadge } from "@/components/ScoreBadge";
 import { StageBadge } from "@/components/StageBadge";
 import {
   formatCtc,
@@ -72,6 +107,12 @@ export function HrJobApplicantsPage() {
   const [applicants, setApplicants] = useState<Application[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notesFor, setNotesFor] = useState<Application | null>(null);
+  // When ranked-mode is on, we fetch /ranked (ignoring filters/sort) so HR
+  // can compare candidates against the job's requirements directly.
+  const [ranked, setRanked] = useState(false);
+  const [scoreByAppId, setScoreByAppId] = useState<Map<number, ApplicationScore>>(
+    () => new Map(),
+  );
 
   const apiFilters = useMemo(() => toApi(filters), [filters]);
 
@@ -86,16 +127,30 @@ export function HrJobApplicantsPage() {
   const refresh = () => {
     if (!jobId) return;
     setError(null);
-    applicationsApi
-      .byJob(jobId, apiFilters)
-      .then(setApplicants)
-      .catch((err) => setError(err instanceof ApiError ? err.detail : "Failed to load applicants"));
+    if (ranked) {
+      applicationsApi
+        .ranked(jobId)
+        .then((rows: RankedApplication[]) => {
+          setApplicants(rows);
+          setScoreByAppId(new Map(rows.map((r) => [r.id, r.score])));
+        })
+        .catch((err) =>
+          setError(err instanceof ApiError ? err.detail : "Failed to load ranking"),
+        );
+    } else {
+      applicationsApi
+        .byJob(jobId, apiFilters)
+        .then(setApplicants)
+        .catch((err) =>
+          setError(err instanceof ApiError ? err.detail : "Failed to load applicants"),
+        );
+    }
   };
 
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId, apiFilters]);
+  }, [jobId, apiFilters, ranked]);
 
   const setStage = async (appId: number, stage: ApplicationStage) => {
     try {
@@ -173,8 +228,20 @@ export function HrJobApplicantsPage() {
           <input className="input" type="number" min={0} value={filters.expected_ctc_max} onChange={(e) => update("expected_ctc_max", e.target.value)} />
         </div>
         <div>
-          <label className="label">Max notice (days)</label>
-          <input className="input" type="number" min={0} value={filters.notice_max_days} onChange={(e) => update("notice_max_days", e.target.value)} />
+          <label className="label" htmlFor="notice-bucket">Notice period</label>
+          <select
+            id="notice-bucket"
+            className="input"
+            value={filters.notice_max_days}
+            onChange={(e) => update("notice_max_days", e.target.value)}
+          >
+            <option value="">Any</option>
+            <option value="0">Immediate joiner</option>
+            <option value="15">≤ 15 days</option>
+            <option value="30">≤ 30 days</option>
+            <option value="60">≤ 60 days</option>
+            <option value="90">≤ 90 days</option>
+          </select>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -201,9 +268,42 @@ export function HrJobApplicantsPage() {
       </aside>
 
       <section className="space-y-3">
-        <div>
-          <h1 className="text-2xl font-semibold">{job ? job.title : "Applicants"}</h1>
-          <p className="text-sm text-slate-500">{applicants.length} applicant{applicants.length === 1 ? "" : "s"}</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold">{job ? job.title : "Applicants"}</h1>
+            <p className="text-sm text-slate-500">
+              {ranked
+                ? "Sorted by fit score against this job's requirements. Filters are not applied in ranking mode."
+                : "Candidate identity (name, email, resume) stays in the profile drawer to keep this view bias-free."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setRanked((v) => !v)}
+              className={ranked ? "btn-primary text-xs" : "btn-secondary text-xs"}
+              aria-pressed={ranked}
+            >
+              {ranked ? "✓ Ranked by fit" : "Rank by fit score"}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                downloadExport(jobId, apiFilters).catch((err) =>
+                  setError(err instanceof ApiError ? err.detail : "Export failed"),
+                )
+              }
+              className="btn-secondary text-xs"
+              disabled={applicants.length === 0}
+              title="Download the current filtered applicants as CSV (no name/email)"
+            >
+              ⬇ Export CSV
+            </button>
+          </div>
+        </div>
+
+        <div className="sr-only" role="status" aria-live="polite">
+          {`Showing ${applicants.length} ${applicants.length === 1 ? "applicant" : "applicants"}`}
         </div>
 
         <ErrorBanner message={error} />
@@ -215,68 +315,79 @@ export function HrJobApplicantsPage() {
             <table className="min-w-full divide-y divide-slate-200 rounded-lg bg-white text-sm ring-1 ring-slate-200">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
                 <tr>
-                  <th className="px-3 py-2">Candidate</th>
-                  <th className="px-3 py-2">Exp</th>
-                  <th className="px-3 py-2">Current</th>
-                  <th className="px-3 py-2">Expected</th>
-                  <th className="px-3 py-2">Notice</th>
-                  <th className="px-3 py-2">Skills</th>
-                  <th className="px-3 py-2">Applied</th>
-                  <th className="px-3 py-2">Stage</th>
-                  <th className="px-3 py-2" />
+                  <th scope="col" className="px-3 py-2">Applicant</th>
+                  <th scope="col" className="px-3 py-2">Exp</th>
+                  <th scope="col" className="px-3 py-2">Current</th>
+                  <th scope="col" className="px-3 py-2">Expected</th>
+                  <th scope="col" className="px-3 py-2">Notice</th>
+                  <th scope="col" className="px-3 py-2">Skills</th>
+                  <th scope="col" className="px-3 py-2">Applied</th>
+                  <th scope="col" className="px-3 py-2">Stage</th>
+                  <th scope="col" className="px-3 py-2"><span className="sr-only">Profile</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {applicants.map((a) => (
-                  <tr key={a.id}>
-                    <td className="px-3 py-2">
-                      <div className="font-medium text-slate-900">{a.candidate?.full_name ?? "—"}</div>
-                      <div className="text-xs text-slate-500">{a.candidate?.email}</div>
-                      <a
-                        href={a.resume_link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-brand-600 hover:underline"
-                        aria-label={`Open ${a.candidate?.full_name ?? "candidate"}'s resume in a new tab`}
-                      >
-                        Resume ↗
-                      </a>
-                    </td>
-                    <td className="px-3 py-2 text-slate-700">{a.years_experience}y</td>
-                    <td className="px-3 py-2 text-slate-700">{formatCtc(a.current_ctc)}</td>
-                    <td className="px-3 py-2 text-slate-700">{formatCtc(a.expected_ctc)}</td>
-                    <td className="px-3 py-2 text-slate-700">{a.notice_period_days}d</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {a.skills.slice(0, 4).map((s) => (
-                          <span key={s} className="badge bg-brand-50 text-brand-700">{s}</span>
-                        ))}
-                        {a.skills.length > 4 ? <span className="text-xs text-slate-500">+{a.skills.length - 4}</span> : null}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-slate-500">{formatRelative(a.created_at)}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-col gap-1">
-                        <StageBadge stage={a.stage} />
-                        <select
-                          className="input py-0.5 text-xs"
-                          value={a.stage}
-                          onChange={(e) => setStage(a.id, e.target.value as ApplicationStage)}
-                          aria-label={`Change stage for ${a.candidate?.full_name ?? "applicant"}`}
-                        >
-                          {APPLICATION_STAGES.map((s) => (
-                            <option key={s} value={s}>{stageLabel(s)}</option>
+                {applicants.map((a) => {
+                  const score = scoreByAppId.get(a.id);
+                  const matched = new Set(score?.matched_skills ?? []);
+                  return (
+                    <tr key={a.id}>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-700">#{a.id}</span>
+                          {ranked && score ? <ScoreBadge score={score} /> : null}
+                        </div>
+                        <div className="text-xs text-slate-500">{a.years_experience}y · {a.notice_period_days}d notice</div>
+                      </td>
+                      <td className="px-3 py-2 text-slate-700">{a.years_experience}y</td>
+                      <td className="px-3 py-2 text-slate-700">{formatCtc(a.current_ctc)}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatCtc(a.expected_ctc)}</td>
+                      <td className="px-3 py-2 text-slate-700">{a.notice_period_days}d</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {a.skills.slice(0, 4).map((s) => (
+                            <span
+                              key={s}
+                              className={`badge ${
+                                ranked && matched.has(s.toLowerCase())
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "bg-brand-50 text-brand-700"
+                              }`}
+                            >
+                              {s}
+                            </span>
                           ))}
-                        </select>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <button onClick={() => setNotesFor(a)} className="text-xs text-brand-600 hover:underline">
-                        Notes
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                          {a.skills.length > 4 ? <span className="text-xs text-slate-500">+{a.skills.length - 4}</span> : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-slate-500">{formatRelative(a.created_at)}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-col gap-1">
+                          <StageBadge stage={a.stage} />
+                          <select
+                            className="input py-0.5 text-xs"
+                            value={a.stage}
+                            onChange={(e) => setStage(a.id, e.target.value as ApplicationStage)}
+                            aria-label={`Change stage for applicant ${a.id}`}
+                          >
+                            {APPLICATION_STAGES.map((s) => (
+                              <option key={s} value={s}>{stageLabel(s)}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          onClick={() => setNotesFor(a)}
+                          className="text-xs text-brand-600 hover:underline"
+                          aria-label={`View profile for applicant ${a.id}`}
+                        >
+                          View profile
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

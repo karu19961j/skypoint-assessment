@@ -6,11 +6,15 @@ import type {
   ApplicationNote,
   ApplicationStage,
   Bookmark,
+  CandidateProfile,
   DashboardData,
   Job,
   JobCreate,
   JobStatus,
   JobUpdate,
+  ProfileUpsert,
+  RankedApplication,
+  RecommendedJob,
   TokenResponse,
   User,
 } from "./types";
@@ -52,6 +56,7 @@ export interface JobListFilters {
   skills?: string[];
   status?: JobStatus;
   mine?: boolean;
+  sort?: "recent" | "salary_high" | "exp_low";
 }
 
 export const jobsApi = {
@@ -75,6 +80,9 @@ export const jobsApi = {
   },
   remove(id: number) {
     return apiFetch<void>(`/jobs/${id}`, { method: "DELETE" });
+  },
+  recommended() {
+    return apiFetch<RecommendedJob[]>("/jobs/recommended");
   },
 };
 
@@ -104,7 +112,7 @@ export const applicationsApi = {
   apply(payload: ApplicationCreate) {
     return apiFetch<Application>("/applications/", { method: "POST", body: payload });
   },
-  mine(filters: { stage?: ApplicationStage; q?: string } = {}) {
+  mine(filters: { stage?: ApplicationStage; q?: string; sort?: "recent" | "updated" } = {}) {
     return apiFetch<Application[]>("/applications/mine", { query: filters });
   },
   withdraw(id: number) {
@@ -137,6 +145,21 @@ export const applicationsApi = {
   },
   timeline(id: number) {
     return apiFetch<ApplicationEvent[]>(`/applications/${id}/timeline`);
+  },
+  ranked(jobId: number) {
+    return apiFetch<RankedApplication[]>(`/applications/by-job/${jobId}/ranked`);
+  },
+};
+
+export const profileApi = {
+  get() {
+    return apiFetch<CandidateProfile | null>("/profile/");
+  },
+  upsert(payload: ProfileUpsert) {
+    return apiFetch<CandidateProfile>("/profile/", { method: "PUT", body: payload });
+  },
+  remove() {
+    return apiFetch<void>("/profile/", { method: "DELETE" });
   },
 };
 

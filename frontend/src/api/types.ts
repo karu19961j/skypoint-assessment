@@ -118,6 +118,48 @@ export interface ApplicationEvent {
   created_at: string;
 }
 
+export interface ApplicationScore {
+  total: number;
+  skill: number;
+  exp: number;
+  ctc: number;
+  notice: number;
+  location: number;
+  matched_skills: string[];
+}
+
+export interface RankedApplication extends Application {
+  score: ApplicationScore;
+}
+
+export interface JobScore {
+  total: number;
+  skill: number;
+  exp: number;
+  ctc: number;
+  location: number;
+  matched_skills: string[];
+}
+
+export interface RecommendedJob extends Job {
+  score: JobScore;
+}
+
+export interface CandidateProfile {
+  skills: string[];
+  years_experience: number;
+  expected_ctc: number;
+  preferred_location: LocationType | null;
+  created_at: string;
+}
+
+export interface ProfileUpsert {
+  skills: string[];
+  years_experience: number;
+  expected_ctc: number;
+  preferred_location: LocationType | null;
+}
+
 export interface Bookmark {
   id: number;
   job_id: number;
@@ -126,13 +168,16 @@ export interface Bookmark {
   job?: Job | null;
 }
 
+export interface JobFunnelEntry {
+  job_id: number;
+  title: string;
+  counts: Record<ApplicationStage, number>;
+  total: number;
+}
+
 export interface DashboardData {
   jobs: { active: number; paused: number; closed: number };
   applications: { today: number; this_week: number };
-  funnels: Array<{
-    job_id: number;
-    title: string;
-    counts: Record<ApplicationStage, number>;
-    total: number;
-  }>;
+  funnels: JobFunnelEntry[];
+  top_jobs: JobFunnelEntry[];
 }

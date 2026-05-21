@@ -1,8 +1,11 @@
+import csv
+import io
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import Select, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -28,7 +31,10 @@ from app.schemas.application import (
     ApplicationStageUpdate,
     CandidateMini,
     JobMini,
+    RankedApplicationOut,
+    ScoreBreakdownOut,
 )
+from app.services.ranking import score_application_for_job
 
 router = APIRouter()
 
@@ -190,17 +196,20 @@ def list_my_applications(
     current_user: Annotated[User, Depends(require_role(UserRole.candidate))],
     stage: ApplicationStage | None = None,
     q: str | None = None,
+    sort: str = Query(default="recent", pattern="^(recent|updated)$"),
 ) -> list[ApplicationDetail]:
-    stmt = (
-        select(Application)
-        .where(Application.candidate_id == current_user.id)
-        .order_by(Application.created_at.desc())
-    )
+    stmt = select(Application).where(Application.candidate_id == current_user.id)
     if stage is not None:
         stmt = stmt.where(Application.stage == stage)
     if q:
         like = f"%{q.lower()}%"
         stmt = stmt.join(Job).where(Job.title.ilike(like))
+
+    if sort == "updated":
+        stmt = stmt.order_by(Application.updated_at.desc())
+    else:
+        stmt = stmt.order_by(Application.created_at.desc())
+
     apps = db.scalars(stmt).all()
     return [_detail(a) for a in apps]
 
@@ -296,6 +305,140 @@ def list_applicants(
     )
     apps = db.scalars(stmt).all()
     return [_detail(a) for a in apps]
+
+
+@router.get("/by-job/{job_id}/export")
+def export_applicants_csv(
+    job_id: int,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_role(UserRole.hr))],
+    stage: ApplicationStage | None = None,
+    skills_any: list[str] | None = Query(default=None),
+    skills_all: list[str] | None = Query(default=None),
+    exp_min: int | None = Query(default=None, ge=0),
+    exp_max: int | None = Query(default=None, ge=0),
+    current_ctc_min: int | None = Query(default=None, ge=0),
+    current_ctc_max: int | None = Query(default=None, ge=0),
+    expected_ctc_min: int | None = Query(default=None, ge=0),
+    expected_ctc_max: int | None = Query(default=None, ge=0),
+    notice_max_days: int | None = Query(default=None, ge=0),
+    applied_after: date | None = None,
+    applied_before: date | None = None,
+    q: str | None = None,
+    sort: str = Query(
+        default="recent",
+        pattern="^(recent|expected_ctc|notice|experience)$",
+    ),
+) -> StreamingResponse:
+    """CSV export of the same filtered applicants the table shows.
+
+    Columns: applicant_id, experience_years, skills, current_ctc,
+    expected_ctc, notice_period_days, stage, applied_date. Identity
+    fields (name, email, resume) are intentionally omitted to keep the
+    export consistent with the in-app anonymized cards.
+    """
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.hr_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not own this job.")
+
+    filters = _filters_from_query(
+        stage, skills_any, skills_all, exp_min, exp_max,
+        current_ctc_min, current_ctc_max, expected_ctc_min, expected_ctc_max,
+        notice_max_days, applied_after, applied_before, q, sort,
+    )
+    stmt = _apply_filters(
+        select(Application).where(Application.job_id == job_id), filters
+    )
+    apps = db.scalars(stmt).all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "applicant_id",
+        "experience_years",
+        "skills",
+        "current_ctc",
+        "expected_ctc",
+        "notice_period_days",
+        "stage",
+        "applied_date",
+    ])
+    for a in apps:
+        writer.writerow([
+            a.id,
+            a.years_experience,
+            "; ".join(a.skills),
+            a.current_ctc,
+            a.expected_ctc,
+            a.notice_period_days,
+            a.stage.value,
+            a.created_at.date().isoformat(),
+        ])
+
+    buf.seek(0)
+    slug = job.title.lower().replace(" ", "-")
+    filename = f"candidates-{slug}-{datetime.now(timezone.utc).date().isoformat()}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get(
+    "/by-job/{job_id}/ranked",
+    response_model=list[RankedApplicationOut],
+)
+def list_ranked_applicants(
+    job_id: int,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_role(UserRole.hr))],
+) -> list[RankedApplicationOut]:
+    """Score every applicant on the job against its requirements and
+    return them sorted by total fit score (descending)."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.hr_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not own this job.")
+
+    apps = db.scalars(
+        select(Application).where(Application.job_id == job_id)
+    ).all()
+
+    ranked: list[RankedApplicationOut] = []
+    for a in apps:
+        score = score_application_for_job(
+            required_skills=job.skills,
+            candidate_skills=a.skills,
+            job_exp_min=job.exp_min,
+            job_exp_max=job.exp_max,
+            job_ctc_min=job.ctc_min,
+            job_ctc_max=job.ctc_max,
+            candidate_years=a.years_experience,
+            candidate_expected_ctc=a.expected_ctc,
+            candidate_notice_days=a.notice_period_days,
+        )
+        detail = _detail(a).model_dump()
+        ranked.append(
+            RankedApplicationOut(
+                **detail,
+                score=ScoreBreakdownOut(
+                    total=score.total,
+                    skill=score.skill,
+                    exp=score.exp,
+                    ctc=score.ctc,
+                    notice=score.notice,
+                    location=score.location,
+                    matched_skills=score.matched_skills,
+                ),
+            )
+        )
+
+    ranked.sort(key=lambda r: r.score.total, reverse=True)
+    return ranked
 
 
 @router.get("/all", response_model=list[ApplicationDetail])
