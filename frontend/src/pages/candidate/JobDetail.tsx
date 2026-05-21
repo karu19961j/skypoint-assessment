@@ -6,9 +6,10 @@ import { z } from "zod";
 
 import { ApiError } from "@/api/client";
 import { applicationsApi, bookmarksApi, jobsApi } from "@/api/endpoints";
-import type { Job } from "@/api/types";
+import type { Job, ResumeUploadResponse } from "@/api/types";
 import { DeadlinePill } from "@/components/DeadlinePill";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { ResumeUpload } from "@/components/ResumeUpload";
 import { TagInput } from "@/components/TagInput";
 import {
   employmentLabel,
@@ -18,7 +19,6 @@ import {
 } from "@/lib/format";
 
 const applySchema = z.object({
-  resume_link: z.string().url("Provide a valid URL to your resume"),
   cover_note: z.string().max(5000, "Cover note too long"),
   current_ctc: z.coerce.number().int().min(0),
   expected_ctc: z.coerce.number().int().min(0),
@@ -38,16 +38,18 @@ export function CandidateJobDetailPage() {
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [skills, setSkills] = useState<string[]>([]);
+  const [resume, setResume] = useState<ResumeUploadResponse | null>(null);
+  const [autofillNotice, setAutofillNotice] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
     reset,
   } = useForm<ApplyValues>({
     resolver: zodResolver(applySchema),
     defaultValues: {
-      resume_link: "",
       cover_note: "",
       current_ctc: 0,
       expected_ctc: 0,
@@ -89,12 +91,44 @@ export function CandidateJobDetailPage() {
     }
   };
 
+  const onResumeUploaded = (result: ResumeUploadResponse) => {
+    setResume(result);
+    // Apply autofill: skills (merge with whatever the candidate already
+    // typed) and years_experience (only if non-null and the form value
+    // is still the default 0 — never clobber an explicit entry).
+    const newSkills = Array.from(
+      new Set([...skills, ...result.autofill.skills.filter(Boolean)]),
+    );
+    const skillsChanged = newSkills.length !== skills.length;
+    if (skillsChanged) setSkills(newSkills);
+
+    let yoeApplied = false;
+    if (result.autofill.years_experience !== null) {
+      setValue("years_experience", result.autofill.years_experience, {
+        shouldValidate: true,
+      });
+      yoeApplied = true;
+    }
+
+    if (skillsChanged || yoeApplied) {
+      const bits: string[] = [];
+      if (skillsChanged)
+        bits.push(`${result.autofill.skills.length} matching skill${result.autofill.skills.length === 1 ? "" : "s"}`);
+      if (yoeApplied) bits.push(`${result.autofill.years_experience} year experience`);
+      setAutofillNotice(
+        `Pre-filled ${bits.join(" and ")} from your resume — please review before submitting.`,
+      );
+    } else {
+      setAutofillNotice(null);
+    }
+  };
+
   const onApply = handleSubmit(async (values) => {
     setError(null);
     try {
       await applicationsApi.apply({
         job_id: jobId,
-        resume_link: values.resume_link,
+        resume_key: resume?.resume_key ?? null,
         cover_note: values.cover_note,
         current_ctc: values.current_ctc,
         expected_ctc: values.expected_ctc,
@@ -105,6 +139,8 @@ export function CandidateJobDetailPage() {
       setApplied(true);
       setShowForm(false);
       setSkills([]);
+      setResume(null);
+      setAutofillNotice(null);
       reset();
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Failed to apply");
@@ -171,24 +207,19 @@ export function CandidateJobDetailPage() {
           <ErrorBanner message={error} />
 
           <div>
-            <label className="label" htmlFor="apply-resume">
-              Resume link <span aria-hidden="true" className="text-rose-600">*</span>
+            <label className="label" htmlFor="apply-resume-file">
+              Resume <span aria-hidden="true" className="text-rose-600">*</span>
               <span className="sr-only"> (required)</span>
             </label>
-            <input
-              id="apply-resume"
-              className="input"
-              placeholder="https://…"
-              aria-required="true"
-              aria-invalid={errors.resume_link ? "true" : undefined}
-              aria-describedby={errors.resume_link ? "apply-resume-error" : undefined}
-              {...register("resume_link")}
-            />
-            {errors.resume_link && (
-              <p id="apply-resume-error" role="alert" className="mt-1 text-xs text-rose-600">
-                {errors.resume_link.message}
-              </p>
-            )}
+            <ResumeUpload jobId={jobId} onUploaded={onResumeUploaded} />
+            {autofillNotice ? (
+              <div
+                className="mt-2 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800"
+                role="status"
+              >
+                ✨ {autofillNotice}
+              </div>
+            ) : null}
           </div>
           <div>
             <label className="label" htmlFor="apply-cover">Cover note</label>
@@ -282,7 +313,7 @@ export function CandidateJobDetailPage() {
             <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">
               Cancel
             </button>
-            <button type="submit" className="btn-primary" disabled={isSubmitting}>
+            <button type="submit" className="btn-primary" disabled={isSubmitting || !resume}>
               {isSubmitting ? "Submitting…" : "Submit application"}
             </button>
           </div>
