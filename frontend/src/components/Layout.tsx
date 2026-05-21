@@ -9,6 +9,7 @@ export function Layout() {
     { to: "/jobs", label: "Browse jobs" },
     { to: "/me/applications", label: "My applications" },
     { to: "/me/bookmarks", label: "Saved" },
+    { to: "/me/profile", label: "Profile" },
   ];
   const hrLinks = [
     { to: "/hr", label: "Dashboard" },

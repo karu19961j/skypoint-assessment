@@ -9,6 +9,7 @@ import { BookmarksPage } from "@/pages/candidate/Bookmarks";
 import { CandidateJobDetailPage } from "@/pages/candidate/JobDetail";
 import { CandidateJobsPage } from "@/pages/candidate/JobsBrowse";
 import { MyApplicationsPage } from "@/pages/candidate/MyApplications";
+import { CandidateProfilePage } from "@/pages/candidate/Profile";
 import { HrAllApplicantsPage } from "@/pages/hr/AllApplicants";
 import { HrDashboardPage } from "@/pages/hr/Dashboard";
 import { HrJobApplicantsPage } from "@/pages/hr/JobApplicants";
@@ -38,6 +39,7 @@ export function App() {
               <Route path="/jobs/:id" element={<CandidateJobDetailPage />} />
               <Route path="/me/applications" element={<MyApplicationsPage />} />
               <Route path="/me/bookmarks" element={<BookmarksPage />} />
+              <Route path="/me/profile" element={<CandidateProfilePage />} />
             </Route>
 
             <Route element={<ProtectedRoute roles={["hr"]} />}>
