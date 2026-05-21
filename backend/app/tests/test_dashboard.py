@@ -38,3 +38,31 @@ def test_candidate_cannot_view_dashboard(
 ) -> None:
     resp = client.get("/api/dashboard/hr", headers=candidate_headers)
     assert resp.status_code == 403
+
+
+def test_top_jobs_excludes_closed_jobs(
+    client: TestClient, hr_headers: dict
+) -> None:
+    """Closed jobs no longer have a live pipeline — they shouldn't crowd
+    the Top 5 surface."""
+    live = client.post(
+        "/api/jobs/", json=sample_job_payload(title="Live"), headers=hr_headers
+    ).json()
+    paused = client.post(
+        "/api/jobs/", json=sample_job_payload(title="Paused"), headers=hr_headers
+    ).json()
+    client.patch(
+        f"/api/jobs/{paused['id']}/status",
+        json={"status": "paused"},
+        headers=hr_headers,
+    )
+    closed = client.post(
+        "/api/jobs/", json=sample_job_payload(title="Closed"), headers=hr_headers
+    ).json()
+    client.post(f"/api/jobs/{closed['id']}/close", headers=hr_headers)
+
+    dash = client.get("/api/dashboard/hr", headers=hr_headers).json()
+    top_titles = {j["title"] for j in dash["top_jobs"]}
+    assert "Live" in top_titles
+    assert "Paused" in top_titles  # Paused jobs still have a live pipeline
+    assert "Closed" not in top_titles

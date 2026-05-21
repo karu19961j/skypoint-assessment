@@ -44,7 +44,7 @@ export function HrDashboardPage() {
         <StatCard label="Paused jobs" value={data.jobs.paused} />
         <StatCard label="Closed jobs" value={data.jobs.closed} />
         <StatCard label="Apps today" value={data.applications.today} />
-        <StatCard label="Apps this week" value={data.applications.this_week} />
+        <StatCard label="Apps last 7 days" value={data.applications.this_week} />
       </div>
 
       {/* Aggregated funnel across all the HR's jobs — quick-glance volume by stage. */}

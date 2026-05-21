@@ -15,6 +15,11 @@ from app.schemas.dashboard import (
 
 router = APIRouter()
 
+# How many entries to surface in the "top jobs by applications" section.
+TOP_JOBS_COUNT = 5
+# Rolling-window length for the "applications received recently" stat.
+ACTIVITY_WINDOW_DAYS = 7
+
 
 @router.get("/hr", response_model=DashboardOut)
 def hr_dashboard(
@@ -31,10 +36,11 @@ def hr_dashboard(
     for row_status, n in status_rows:
         setattr(counts, row_status.value, n)
 
-    # 2) Applications today / this week (across HR's jobs).
+    # 2) Applications today / rolling 7-day window (across HR's jobs).
     now = datetime.now(timezone.utc)
     start_of_today = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
-    start_of_week = start_of_today - timedelta(days=6)
+    # Inclusive of today → subtract (window - 1) days.
+    start_of_window = start_of_today - timedelta(days=ACTIVITY_WINDOW_DAYS - 1)
 
     own_jobs_subq = select(Job.id).where(Job.hr_id == current_user.id).scalar_subquery()
 
@@ -46,10 +52,13 @@ def hr_dashboard(
     week_count = db.scalar(
         select(func.count(Application.id))
         .where(Application.job_id.in_(own_jobs_subq))
-        .where(Application.created_at >= start_of_week)
+        .where(Application.created_at >= start_of_window)
     ) or 0
 
     activity = ApplicationActivity(today=today_count, this_week=week_count)
+    # `this_week` is a rolling 7-day window (today + previous 6 days),
+    # not the ISO calendar week. The frontend label says "Apps in last 7
+    # days" to match.
 
     # 3) Per-job stage funnel.
     funnel_rows = db.execute(
@@ -76,7 +85,23 @@ def hr_dashboard(
             entry.total += n
 
     funnels = list(grouped.values())
-    top_jobs = sorted(funnels, key=lambda f: f.total, reverse=True)[:5]
+
+    # "Top 5 jobs by applications" surfaces where the HR's attention should
+    # go right now. A closed job — even one that had high volume historically
+    # — has no actionable pipeline left, so filter it out before slicing.
+    # Active + Paused jobs both have live pipelines worth surfacing.
+    live_job_ids = {
+        j_id
+        for j_id, j_status in db.execute(
+            select(Job.id, Job.status).where(Job.hr_id == current_user.id)
+        ).all()
+        if j_status != JobStatus.closed
+    }
+    top_jobs = sorted(
+        (f for f in funnels if f.job_id in live_job_ids),
+        key=lambda f: f.total,
+        reverse=True,
+    )[:TOP_JOBS_COUNT]
     return DashboardOut(
         jobs=counts,
         applications=activity,
