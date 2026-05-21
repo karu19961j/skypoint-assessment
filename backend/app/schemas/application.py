@@ -1,13 +1,17 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import ApplicationStage
 
 
 class ApplicationCreate(BaseModel):
     job_id: int
-    resume_link: HttpUrl
+    # resume_key is returned by POST /api/resume/upload — the apply form
+    # uploads the file first and then submits the key with the rest of
+    # the structured fields. Nullable so a candidate can apply without a
+    # resume if they choose (cover note + profile may be enough).
+    resume_key: str | None = Field(default=None, max_length=255)
     cover_note: str = Field(default="", max_length=5000)
     current_ctc: int = Field(ge=0)
     expected_ctc: int = Field(ge=0)
@@ -36,13 +40,23 @@ class CandidateMini(BaseModel):
     email: str
 
 
+class ResumeMeta(BaseModel):
+    """Resume metadata embedded on application responses. Identity-bearing
+    (the filename can leak a candidate's name), so list endpoints zero
+    this out and only the detail endpoint returns it populated."""
+
+    filename: str | None = None
+    size_bytes: int | None = None
+    content_type: str | None = None
+
+
 class ApplicationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     job_id: int
     candidate_id: int
-    resume_link: str
+    resume: ResumeMeta | None = None
     cover_note: str
     current_ctc: int
     expected_ctc: int
@@ -98,3 +112,26 @@ class ScoreBreakdownOut(BaseScoreOut):
 
 class RankedApplicationOut(ApplicationDetail):
     score: ScoreBreakdownOut
+
+
+# ---------- resume upload payloads ----------
+
+
+class AutofillOut(BaseModel):
+    """What the apply form pre-fills after a successful upload. Empty
+    fields = "we couldn't tell" — the form leaves the user's current
+    value alone in those cases."""
+
+    skills: list[str] = []
+    years_experience: int | None = None
+
+
+class ResumeUploadOut(BaseModel):
+    """Response of POST /api/resume/upload. The candidate's next step is
+    to POST /api/applications/ with `resume_key` plus their form fields."""
+
+    resume_key: str
+    filename: str
+    size_bytes: int
+    content_type: str
+    autofill: AutofillOut

@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.db import engine
 from app.models import Base
 from app.seed import run_seed
+from app.services.storage import get_storage
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,10 @@ def main() -> None:
     get_settings().assert_production_ready()
     wait_for_db()
     Base.metadata.create_all(bind=engine)
+    # MinIO bucket: wait until the service answers, then create the
+    # bucket if it isn't there yet. Idempotent, so a re-run of bootstrap
+    # against an existing bucket is a no-op.
+    get_storage().wait_and_ensure_bucket()
     run_seed()
     logger.info("Bootstrap complete.")
 

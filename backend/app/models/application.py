@@ -44,7 +44,16 @@ class Application(Base, TimestampMixin):
     candidate_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    resume_link: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Resume is stored in MinIO under `resume_key`; the row keeps just
+    # enough metadata to render filename + size and to seed text-based
+    # filtering. `resume_text` is the extracted plain text (empty when
+    # extraction isn't possible — e.g. legacy .doc — so keyword search
+    # quietly misses those rather than erroring).
+    resume_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    resume_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    resume_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    resume_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    resume_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     current_ctc: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     expected_ctc: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

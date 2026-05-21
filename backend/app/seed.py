@@ -222,10 +222,18 @@ def _seed_applications(
         job: Job = s["job"]
         final_stage: ApplicationStage = s["stage"]
 
+        # Seed applications without a real resume — the candidate flow
+        # uploads one before applying, but the seed data predates the
+        # storage backend. HR will see "no resume on file" in the drawer
+        # for these rows, which mirrors a real "applied via referral" case.
         application = Application(
             job_id=job.id,
             candidate_id=candidate.id,
-            resume_link="https://example.com/resume.pdf",
+            resume_key=None,
+            resume_filename=None,
+            resume_size_bytes=None,
+            resume_content_type=None,
+            resume_text=None,
             cover_note=s["cover_note"],
             current_ctc=s["current_ctc"],
             expected_ctc=s["expected_ctc"],
