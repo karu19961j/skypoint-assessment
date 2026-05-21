@@ -8,6 +8,9 @@ import { ApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthContext";
 import { ErrorBanner } from "@/components/ErrorBanner";
 
+// HR accounts are seeded (and would be provisioned via an admin/invite flow
+// in production). The public form only registers candidates; the backend
+// enforces the same restriction even if someone bypasses the UI.
 const schema = z.object({
   email: z.string().email("Enter a valid email"),
   password: z
@@ -15,7 +18,7 @@ const schema = z.object({
     .min(8, "At least 8 characters")
     .max(128, "Password too long"),
   full_name: z.string().min(1, "Name is required"),
-  role: z.enum(["candidate", "hr"]),
+  role: z.literal("candidate"),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -49,17 +52,26 @@ export function RegisterPage() {
     <div className="mx-auto mt-12 max-w-md">
       <div className="card">
         <h1 className="mb-1 text-xl font-semibold">Create your account</h1>
-        <p className="mb-4 text-sm text-slate-500">
-          Sign up as a candidate to apply, or as HR to post jobs.
+        <p className="mb-1 text-sm text-slate-500">
+          Self-signup creates a <strong>Candidate</strong> account. HR accounts
+          are provisioned by administrators &mdash; use the seeded HR
+          credentials in the README to evaluate the recruiter view.
+        </p>
+        <p className="mb-4 text-xs text-slate-500">
+          Fields marked <span className="text-rose-600">*</span> are required.
         </p>
 
         <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <ErrorBanner message={error} />
           <div>
-            <label className="label" htmlFor="reg-full-name">Full name</label>
+            <label className="label" htmlFor="reg-full-name">
+              Full name <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="reg-full-name"
               className="input"
+              aria-required="true"
               aria-invalid={errors.full_name ? "true" : undefined}
               aria-describedby={errors.full_name ? "reg-full-name-error" : undefined}
               {...register("full_name")}
@@ -71,12 +83,16 @@ export function RegisterPage() {
             )}
           </div>
           <div>
-            <label className="label" htmlFor="reg-email">Email</label>
+            <label className="label" htmlFor="reg-email">
+              Email <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="reg-email"
               type="email"
               autoComplete="email"
               className="input"
+              aria-required="true"
               aria-invalid={errors.email ? "true" : undefined}
               aria-describedby={errors.email ? "reg-email-error" : undefined}
               {...register("email")}
@@ -88,12 +104,16 @@ export function RegisterPage() {
             )}
           </div>
           <div>
-            <label className="label" htmlFor="reg-password">Password</label>
+            <label className="label" htmlFor="reg-password">
+              Password <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="reg-password"
               type="password"
               autoComplete="new-password"
               className="input"
+              aria-required="true"
               aria-invalid={errors.password ? "true" : undefined}
               aria-describedby={errors.password ? "reg-password-error" : undefined}
               {...register("password")}
@@ -104,17 +124,7 @@ export function RegisterPage() {
               </p>
             )}
           </div>
-          <div>
-            <label className="label" htmlFor="reg-role">Account type</label>
-            <select id="reg-role" className="input" {...register("role")}>
-              <option value="candidate">Candidate &mdash; apply to jobs</option>
-              <option value="hr">HR &mdash; post jobs and review applications</option>
-            </select>
-            <p className="mt-1 text-xs text-slate-500">
-              You can also use the seeded HR account in the README to skip
-              registration entirely.
-            </p>
-          </div>
+          <input type="hidden" value="candidate" {...register("role")} />
           <button type="submit" className="btn-primary w-full" disabled={isSubmitting}>
             {isSubmitting ? "Creating…" : "Create account"}
           </button>

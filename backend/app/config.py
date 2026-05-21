@@ -35,11 +35,10 @@ class Settings(BaseSettings):
     seed_candidate_email: str = "candidate@test.com"
     seed_candidate_password: str = "Candidate@1234"
 
-    # Self-serve HR registration. The application code defaults to True so
-    # the demo Register form can show "Sign up as Candidate or HR" out of
-    # the box; production deployments should flip this off and provision HR
-    # users via an admin/invite flow.
-    allow_hr_self_register: bool = True
+    # Self-serve HR registration is OFF by default. HR accounts are
+    # provisioned via the seed (and would be provisioned via an admin/invite
+    # flow in production). The public /register form only accepts candidates.
+    allow_hr_self_register: bool = False
 
     @property
     def cors_origins_list(self) -> list[str]:
