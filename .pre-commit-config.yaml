@@ -1,0 +1,60 @@
+# Run with:  pre-commit install   (one-time, per checkout)
+#            pre-commit run --all-files
+#
+# CI runs the same hooks via the workflow's "lint" + "secret-scan" jobs,
+# so a forgotten install doesn't let bad commits land on main.
+
+repos:
+  # Whitespace / merge-marker / large-file basics.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: detect-private-key
+
+  # Detect secrets that snuck into a commit — API keys, JWTs, AWS keys,
+  # the kind of accident that puts a credential into git history forever.
+  # Gitleaks runs against the staged diff so it stays fast.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # Local hooks share the project's installed toolchain so the rules
+  # don't drift between "what the dev sees on commit" and "what CI runs".
+  - repo: local
+    hooks:
+      # Refuses to commit if .env.example has drifted from
+      # app/config.py or docker-compose.yml. Same script CI runs.
+      - id: check-env-example
+        name: check .env.example drift
+        entry: python scripts/check_env_example.py
+        language: system
+        pass_filenames: false
+        files: '^(\.env\.example|backend/app/config\.py|docker-compose\.yml)$'
+
+      # Frontend lint — catches unused imports, exhaustive-deps misses,
+      # and the rules-of-hooks bugs that tsc can't see. Runs the SAME
+      # `npm run lint` the CI step uses (eslint --max-warnings 0), so a
+      # green pre-commit means a green CI lint check.
+      - id: frontend-lint
+        name: frontend lint (eslint)
+        entry: bash -c 'cd frontend && npm run lint'
+        language: system
+        pass_filenames: false
+        files: '^frontend/(src/.*\.(ts|tsx)|eslint\.config\.js|package\.json)$'
+
+      # Frontend type-check — `tsc --noEmit` catches unused imports
+      # (noUnusedLocals), wrong prop types, and anything the build
+      # would catch later. Same script the CI's frontend job runs as
+      # part of `npm run build`.
+      - id: frontend-typecheck
+        name: frontend type-check (tsc)
+        entry: bash -c 'cd frontend && npx tsc --noEmit'
+        language: system
+        pass_filenames: false
+        files: '^frontend/(src/.*\.(ts|tsx)|tsconfig\.json)$'
