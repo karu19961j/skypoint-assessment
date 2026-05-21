@@ -5,37 +5,37 @@ import { RESUME_ACCEPT, RESUME_MAX_BYTES, resumeApi } from "@/api/endpoints";
 import type { ResumeUploadResponse } from "@/api/types";
 
 /**
- * Candidate-facing resume picker + uploader.
+ * Resume picker + uploader used on /me/profile.
  *
  * Single source of truth for the upload UX: extension check, size check,
- * progress / success / error states, and the resulting key + autofill
- * suggestion. The apply form embeds this once and reads `onUploaded` to
- * pre-fill structured fields.
+ * progress/done/error states, and the resulting key. The profile form
+ * persists the key on save; applications snapshot it at apply time.
  *
- * Why a dedicated component (vs inline in the apply form):
- *   - The validation + error mapping is non-trivial enough that
- *     duplicating it in a second "edit resume" surface later (e.g. on
- *     the profile page) would invite drift.
- *   - The autofill banner is co-located with the upload — the user sees
- *     "we found 4 matching skills" right where they uploaded, not at the
- *     top of the form.
+ * Autofill removed — the candidate fills the profile manually because
+ * profile is the canonical source. The parsed resume_text still gets
+ * stored on the profile for HR keyword search.
  */
 export function ResumeUpload({
-  jobId,
+  initialFilename,
+  initialSizeBytes,
   onUploaded,
+  onCleared,
 }: {
-  /** Job context lets the autofill cross-match resume text against the
-   *  job's required skills. Omit to upload without skill suggestions. */
-  jobId?: number;
-  /** Fired on every successful upload — apply form persists the key and
-   *  applies the autofill. */
+  /** Existing resume filename (when editing a profile that already has one). */
+  initialFilename?: string | null;
+  initialSizeBytes?: number | null;
+  /** Fired on every successful upload with the new resume_key. */
   onUploaded: (result: ResumeUploadResponse) => void;
+  /** Fired when the candidate clears their resume from the profile. */
+  onCleared?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [status, setStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "uploading" | "done" | "error">(
+    initialFilename ? "done" : "idle",
+  );
   const [error, setError] = useState<string | null>(null);
-  const [filename, setFilename] = useState<string | null>(null);
-  const [sizeBytes, setSizeBytes] = useState<number | null>(null);
+  const [filename, setFilename] = useState<string | null>(initialFilename ?? null);
+  const [sizeBytes, setSizeBytes] = useState<number | null>(initialSizeBytes ?? null);
 
   const onPick = async (file: File | undefined) => {
     if (!file) return;
@@ -55,7 +55,7 @@ export function ResumeUpload({
     setFilename(file.name);
     setSizeBytes(file.size);
     try {
-      const result = await resumeApi.upload(file, jobId);
+      const result = await resumeApi.upload(file);
       setStatus("done");
       onUploaded(result);
     } catch (err) {
@@ -64,19 +64,29 @@ export function ResumeUpload({
     }
   };
 
+  const clear = () => {
+    setStatus("idle");
+    setFilename(null);
+    setSizeBytes(null);
+    setError(null);
+    if (inputRef.current) inputRef.current.value = "";
+    onCleared?.();
+  };
+
   return (
     <div className="space-y-2">
       <input
         ref={inputRef}
-        id="apply-resume-file"
+        id="profile-resume-file"
         type="file"
         accept={RESUME_ACCEPT}
         className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
-        aria-describedby="apply-resume-help"
+        aria-describedby="profile-resume-help"
         onChange={(e) => onPick(e.target.files?.[0])}
       />
-      <p id="apply-resume-help" className="text-xs text-slate-500">
-        PDF, DOC, or DOCX. Max {formatSize(RESUME_MAX_BYTES)}.
+      <p id="profile-resume-help" className="text-xs text-slate-500">
+        PDF, DOC, or DOCX. Max {formatSize(RESUME_MAX_BYTES)}. Your resume travels
+        with every application you submit.
       </p>
       {status === "uploading" && filename ? (
         <p className="text-xs text-slate-600" role="status">
@@ -84,10 +94,22 @@ export function ResumeUpload({
         </p>
       ) : null}
       {status === "done" && filename ? (
-        <p className="text-xs text-emerald-700" role="status">
-          ✓ Uploaded {filename}
-          {sizeBytes !== null ? ` (${formatSize(sizeBytes)})` : ""}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-emerald-700" role="status">
+            ✓ {filename}
+            {sizeBytes !== null ? ` (${formatSize(sizeBytes)})` : ""}
+          </p>
+          {onCleared ? (
+            <button
+              type="button"
+              onClick={clear}
+              className="text-xs text-rose-600 hover:underline"
+              aria-label="Remove resume from profile"
+            >
+              Remove
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {status === "error" && error ? (
         <p className="text-xs text-rose-600" role="alert">

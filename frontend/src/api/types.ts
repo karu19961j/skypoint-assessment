@@ -85,6 +85,10 @@ export interface Application {
   /** Resume metadata. `null` on anonymized list responses; populated on
    *  the identity-bearing detail endpoint (Profile drawer). */
   resume: ResumeMeta | null;
+  /** Snapshot of the candidate's profile (fresher flag, experience,
+   *  education) at apply time. Identity-bearing → populated only on the
+   *  detail endpoint, null on list views. */
+  profile_snapshot: ProfileSnapshot | null;
   cover_note: string;
   current_ctc: number;
   expected_ctc: number;
@@ -102,21 +106,11 @@ export interface Application {
 }
 
 export interface ApplicationCreate {
+  /** All candidate data (CTC, experience, skills, education, resume)
+   *  lives on the profile. Apply only takes the job id + an optional
+   *  cover note specific to this application. */
   job_id: number;
-  /** Set after a successful POST /api/resume/upload. Optional — a
-   *  candidate may apply without a resume. */
-  resume_key: string | null;
   cover_note: string;
-  current_ctc: number;
-  expected_ctc: number;
-  notice_period_days: number;
-  years_experience: number;
-  skills: string[];
-}
-
-export interface ResumeAutofill {
-  skills: string[];
-  years_experience: number | null;
 }
 
 export interface ResumeUploadResponse {
@@ -124,7 +118,29 @@ export interface ResumeUploadResponse {
   filename: string;
   size_bytes: number;
   content_type: string;
-  autofill: ResumeAutofill;
+}
+
+export interface ExperienceSnapshot {
+  company: string;
+  role: string;
+  from_date: string;
+  to_date: string | null;
+  is_current: boolean;
+  description: string | null;
+}
+
+export interface EducationSnapshot {
+  institution: string;
+  degree: string;
+  field_of_study: string | null;
+  from_year: number;
+  to_year: number | null;
+}
+
+export interface ProfileSnapshot {
+  is_fresher: boolean;
+  experiences: ExperienceSnapshot[];
+  educations: EducationSnapshot[];
 }
 
 export interface ApplicationNote {
@@ -179,19 +195,57 @@ export interface RecommendedJob extends Job {
   score: ScoreBreakdown;
 }
 
+export interface ProfileResume {
+  key: string | null;
+  filename: string | null;
+  size_bytes: number | null;
+  content_type: string | null;
+}
+
+export interface ProfileExperience {
+  id?: number;
+  company: string;
+  role: string;
+  from_date: string; // ISO date "YYYY-MM-DD"
+  to_date: string | null;
+  is_current: boolean;
+  description: string | null;
+}
+
+export interface ProfileEducation {
+  id?: number;
+  institution: string;
+  degree: string;
+  field_of_study: string | null;
+  from_year: number;
+  to_year: number | null;
+}
+
 export interface CandidateProfile {
   skills: string[];
+  is_fresher: boolean;
   years_experience: number;
+  current_ctc: number;
   expected_ctc: number;
+  notice_period_days: number;
   preferred_locations: LocationType[];
+  experiences: ProfileExperience[];
+  educations: ProfileEducation[];
+  resume: ProfileResume | null;
   created_at: string;
 }
 
 export interface ProfileUpsert {
   skills: string[];
+  is_fresher: boolean;
   years_experience: number;
+  current_ctc: number;
   expected_ctc: number;
+  notice_period_days: number;
   preferred_locations: LocationType[];
+  experiences: Omit<ProfileExperience, "id">[];
+  educations: Omit<ProfileEducation, "id">[];
+  resume_key: string | null;
 }
 
 export interface Bookmark {
