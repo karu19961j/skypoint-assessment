@@ -285,14 +285,14 @@ def run_seed() -> None:
         hr = _get_or_create_user(
             db,
             email=settings.seed_hr_email,
-            password=settings.seed_hr_password,
+            password=settings.seed_hr_password.get_secret_value(),
             full_name="Priya Sharma (HR)",
             role=UserRole.hr,
         )
         candidate = _get_or_create_user(
             db,
             email=settings.seed_candidate_email,
-            password=settings.seed_candidate_password,
+            password=settings.seed_candidate_password.get_secret_value(),
             full_name="Arjun Kumar",
             role=UserRole.candidate,
         )

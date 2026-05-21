@@ -36,7 +36,7 @@ def _ensure_test_database(base_url: str) -> str:
 @pytest.fixture(scope="session")
 def test_engine() -> Generator[Engine, None, None]:
     settings = get_settings()
-    test_url = _ensure_test_database(settings.database_url)
+    test_url = _ensure_test_database(settings.database_url.get_secret_value())
     engine = create_engine(test_url, pool_pre_ping=True, future=True)
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)

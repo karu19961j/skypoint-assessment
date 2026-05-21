@@ -27,14 +27,18 @@ def create_access_token(subject: int, role: str) -> str:
     """Issue a 30-minute access token for `subject` (the user id)."""
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expires_minutes)
     payload = {"sub": str(subject), "role": role, "exp": expire}
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(
+        payload,
+        settings.jwt_secret.get_secret_value(),
+        algorithm=settings.jwt_algorithm,
+    )
 
 
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(
             token,
-            settings.jwt_secret,
+            settings.jwt_secret.get_secret_value(),
             algorithms=[settings.jwt_algorithm],
             options={"require": _REQUIRED_CLAIMS},
         )
