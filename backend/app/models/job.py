@@ -1,7 +1,7 @@
 import enum
 from datetime import date
 
-from sqlalchemy import Date, Enum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, Date, Enum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +31,11 @@ class Job(Base, TimestampMixin):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("ix_jobs_skills_gin", "skills", postgresql_using="gin"),
+        # Defense-in-depth: Pydantic already enforces these on the input
+        # path, but a CHECK at the DB level catches any future code that
+        # bypasses the schema (raw SQL migrations, ETL imports, etc.).
+        CheckConstraint("exp_max >= exp_min", name="ck_jobs_exp_range"),
+        CheckConstraint("ctc_max >= ctc_min", name="ck_jobs_ctc_range"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

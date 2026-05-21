@@ -1,7 +1,16 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -85,6 +94,11 @@ class ApplicationEvent(Base, TimestampMixin):
     """Immutable audit row for every stage transition (including the initial apply)."""
 
     __tablename__ = "application_events"
+    __table_args__ = (
+        # The timeline endpoint orders by created_at within a single
+        # application_id — covered by this composite index.
+        Index("ix_app_events_app_time", "application_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     application_id: Mapped[int] = mapped_column(

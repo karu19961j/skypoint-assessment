@@ -42,8 +42,24 @@ class ProfileOut(BaseModel):
     @field_validator("preferred_locations", mode="before")
     @classmethod
     def _coerce_locations(cls, value: object) -> list[str]:
-        # Stored as text[]; cast each entry into the LocationType enum so
-        # Pydantic validates them and the serialiser emits the lowercase value.
+        """Stored as text[] in Postgres. Cast None → [] and pass each entry
+        through to the LocationType enum validator (the field type does
+        the actual validation; this just normalises the container)."""
         if value is None:
             return []
-        return list(value)  # type: ignore[arg-type]
+        if not isinstance(value, (list, tuple)):
+            raise TypeError(
+                f"preferred_locations must be a list, got {type(value).__name__}"
+            )
+        return list(value)
+
+    @field_validator("preferred_locations", mode="after")
+    @classmethod
+    def _check_known_locations(cls, value: list[LocationType]) -> list[LocationType]:
+        """A raw-SQL insert that bypassed Pydantic could persist garbage like
+        'loud' into the text[] column. Re-validate on read so the API never
+        emits unknown values to clients."""
+        for loc in value:
+            if not isinstance(loc, LocationType):
+                raise ValueError(f"unknown location: {loc!r}")
+        return value
