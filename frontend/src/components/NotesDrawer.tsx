@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiError } from "@/api/client";
-import { applicationsApi } from "@/api/endpoints";
+import { ApiError, downloadFile } from "@/api/client";
+import { applicationsApi, resumeApi } from "@/api/endpoints";
 import type { Application, ApplicationNote } from "@/api/types";
 import { ApplicationTimeline } from "@/components/ApplicationTimeline";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { formatRelative } from "@/lib/format";
+
+
+function formatFileSize(bytes: number | null | undefined): string {
+  if (!bytes && bytes !== 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export function NotesDrawer({
   application: anonymized,
@@ -148,16 +156,38 @@ export function NotesDrawer({
           </div>
         </div>
 
-        <div className="mt-3">
-          <a
-            href={application.resume_link}
-            target="_blank"
-            rel="noreferrer"
-            className="btn-secondary text-xs"
-            aria-label={`Open ${application.candidate?.full_name ?? "candidate"}'s resume in a new tab`}
-          >
-            Open resume ↗
-          </a>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {application.resume?.filename ? (
+            <button
+              type="button"
+              className="btn-secondary text-xs"
+              onClick={async () => {
+                setError(null);
+                try {
+                  await downloadFile(
+                    resumeApi.downloadPath(application.id),
+                    undefined,
+                    application.resume?.filename ?? "resume",
+                  );
+                } catch (err) {
+                  setError(err instanceof ApiError ? err.detail : "Download failed");
+                }
+              }}
+              aria-label={`Download ${application.candidate?.full_name ?? "candidate"}'s resume`}
+            >
+              ⬇ Download resume
+            </button>
+          ) : (
+            <span className="text-xs text-slate-500">No resume on file.</span>
+          )}
+          {application.resume?.filename ? (
+            <span className="text-xs text-slate-500" aria-hidden="true">
+              {application.resume.filename}
+              {application.resume.size_bytes
+                ? ` · ${formatFileSize(application.resume.size_bytes)}`
+                : ""}
+            </span>
+          ) : null}
         </div>
 
         {application.cover_note ? (
