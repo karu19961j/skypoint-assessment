@@ -23,6 +23,7 @@ from app.models import (
     ApplicationEvent,
     ApplicationNote,
     ApplicationStage,
+    CandidateProfile,
     Job,
     JobStatus,
     User,
@@ -37,9 +38,8 @@ from app.schemas.application import (
     ApplicationOut,
     ApplicationStageUpdate,
 )
-from app.services.resume_text import extract_text
-from app.services.storage import get_storage
 from app.sorts import MyApplicationSort
+from sqlalchemy.orm import selectinload
 
 from ._helpers import (
     STAGE_TRANSITIONS,
@@ -53,6 +53,37 @@ from ._helpers import (
 )
 
 router = APIRouter()
+
+
+def _profile_snapshot(profile: CandidateProfile) -> dict:
+    """Capture the non-filterable parts of the profile as a JSON dict
+    that fits into Application.profile_snapshot. Filterable fields
+    (skills, CTCs, exp, notice) ride in their own columns so the
+    applicant filter SQL can index them."""
+    return {
+        "is_fresher": profile.is_fresher,
+        "experiences": [
+            {
+                "company": e.company,
+                "role": e.role,
+                "from_date": e.from_date.isoformat() if e.from_date else None,
+                "to_date": e.to_date.isoformat() if e.to_date else None,
+                "is_current": e.is_current,
+                "description": e.description,
+            }
+            for e in (profile.experiences or [])
+        ],
+        "educations": [
+            {
+                "institution": d.institution,
+                "degree": d.degree,
+                "field_of_study": d.field_of_study,
+                "from_year": d.from_year,
+                "to_year": d.to_year,
+            }
+            for d in (profile.educations or [])
+        ],
+    }
 
 
 @router.post("/", response_model=ApplicationOut, status_code=status.HTTP_201_CREATED)
@@ -87,58 +118,52 @@ def apply(
             status_code=409, detail="You have already applied to this job."
         )
 
-    # Resolve the resume key (if any) against the storage backend. Two
-    # guarantees: (1) the key belongs to this candidate (the prefix on
-    # upload encodes user id), (2) the object actually exists. The
-    # candidate can apply without a resume — many internal-mobility flows
-    # work that way — so a missing key isn't an error here.
-    resume_meta: dict[str, object] = {
-        "resume_key": None,
-        "resume_filename": None,
-        "resume_size_bytes": None,
-        "resume_content_type": None,
-        "resume_text": None,
-    }
-    if payload.resume_key:
-        expected_prefix = f"resumes/{current_user.id}/"
-        if not payload.resume_key.startswith(expected_prefix):
-            raise HTTPException(
-                status_code=403, detail="That resume does not belong to you."
-            )
-        stored = get_storage().head_object(payload.resume_key)
-        if stored is None:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "The uploaded resume could not be found. "
-                    "Please re-upload before submitting."
-                ),
-            )
-        # Re-extract here so resume_text on the application row reflects
-        # the file the candidate actually committed (the upload endpoint
-        # already stored it but we keep things consistent if the upload
-        # was reused across attempts).
-        body_chunks = list(get_storage().iter_object(payload.resume_key))
-        body = b"".join(body_chunks)
-        resume_meta.update(
-            resume_key=payload.resume_key,
-            resume_filename=stored.filename,
-            resume_size_bytes=stored.size,
-            resume_content_type=stored.content_type,
-            resume_text=extract_text(filename=stored.filename or "", body=body) or None,
+    # The candidate's profile is the source of truth for CTC, notice,
+    # skills, experience, education, and the resume. Require it before
+    # the candidate can submit.
+    profile = db.scalar(
+        select(CandidateProfile)
+        .where(CandidateProfile.user_id == current_user.id)
+        .options(
+            selectinload(CandidateProfile.experiences),
+            selectinload(CandidateProfile.educations),
         )
+    )
+    if profile is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Complete your profile before applying. "
+                "We snapshot your skills, experience, CTC, education, "
+                "and resume from there at submit time."
+            ),
+        )
+    # Resume is enforced UI-side (the Apply button is disabled until the
+    # profile has a CV) but we don't 400 server-side — internal-mobility
+    # / referral flows can legitimately apply without one, and HR sees a
+    # clear "No resume on file" pill in those cases.
 
     application = Application(
         job_id=payload.job_id,
         candidate_id=current_user.id,
         cover_note=payload.cover_note,
-        current_ctc=payload.current_ctc,
-        expected_ctc=payload.expected_ctc,
-        notice_period_days=payload.notice_period_days,
-        years_experience=payload.years_experience,
-        skills=[s.strip() for s in payload.skills if s and s.strip()],
+        # Filterable snapshot — these get indexed by the applicant search.
+        current_ctc=profile.current_ctc,
+        expected_ctc=profile.expected_ctc,
+        notice_period_days=profile.notice_period_days,
+        years_experience=profile.years_experience,
+        skills=list(profile.skills or []),
+        # Resume snapshot — points at the same MinIO key, plus the
+        # text+filename so the application page works even if the
+        # candidate edits their profile or re-uploads later.
+        resume_key=profile.resume_key,
+        resume_filename=profile.resume_filename,
+        resume_size_bytes=profile.resume_size_bytes,
+        resume_content_type=profile.resume_content_type,
+        resume_text=profile.resume_text,
+        # JSONB blob — is_fresher + experience[] + education[].
+        profile_snapshot=_profile_snapshot(profile),
         stage=ApplicationStage.applied,
-        **resume_meta,
     )
     db.add(application)
     try:

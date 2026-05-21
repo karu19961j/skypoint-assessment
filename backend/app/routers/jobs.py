@@ -201,8 +201,14 @@ def recommended_jobs(
     # Experience band overlap — keep jobs whose [min, max] band touches
     # the candidate's years ±3 (the experience-fit scorer fully scores
     # candidates inside the band and decays over 3y below the floor).
-    stmt = stmt.where(Job.exp_min <= profile.years_experience + 3)
-    stmt = stmt.where(Job.exp_max >= profile.years_experience - 3)
+    # Freshers (years_experience=0) deliberately don't get nudged into
+    # senior bands — we cap at exp_min<=2 so only entry-level / internship
+    # rows survive the pre-filter for them.
+    if profile.is_fresher:
+        stmt = stmt.where(Job.exp_min <= 2)
+    else:
+        stmt = stmt.where(Job.exp_min <= profile.years_experience + 3)
+        stmt = stmt.where(Job.exp_max >= profile.years_experience - 3)
 
     # CTC headroom — drop jobs whose ceiling is so far below the
     # candidate's ask that the CTC component would zero out anyway.
@@ -210,6 +216,13 @@ def recommended_jobs(
         stmt = stmt.where(
             Job.ctc_max >= int(profile.expected_ctc / _RECOMMEND_CTC_HEADROOM)
         )
+
+    # Substantial-paycut filter — if the candidate is non-fresher and has a
+    # current CTC on file, drop jobs whose ceiling is meaningfully below
+    # it. 80% threshold leaves room for "lower base, better total comp"
+    # plays without surfacing roles that would obviously be a step down.
+    if not profile.is_fresher and profile.current_ctc > 0:
+        stmt = stmt.where(Job.ctc_max >= int(profile.current_ctc * 0.8))
 
     candidates = db.scalars(stmt).all()
 

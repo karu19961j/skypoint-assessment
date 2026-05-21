@@ -11,8 +11,10 @@ Two endpoints:
   POST /api/resume/upload
       Multipart file upload from the candidate. Validates extension +
       size, persists the bytes to MinIO under `resumes/{user_id}/{uuid}`,
-      extracts text, and returns the storage key + autofill suggestions
-      the apply form pre-fills.
+      and returns the storage key. The candidate then submits the key
+      on their profile (PUT /api/profile) — applying to a job snapshots
+      the profile's resume into the application row, no per-application
+      upload step.
 
   GET /api/resume/{application_id}/download
       Owner-checked stream (candidate who owns the app, or HR who owns
@@ -44,13 +46,11 @@ from app.routers.applications._helpers import (
     ensure_can_view_application,
     get_application_or_404,
 )
-from app.schemas.application import AutofillOut, ResumeUploadOut
+from app.schemas.application import ResumeUploadOut
 from app.services.resume_text import (
     SUPPORTED_CONTENT_TYPES,
     SUPPORTED_EXTENSIONS,
     extension_for,
-    extract_text,
-    suggest_autofill,
 )
 from app.services.storage import get_storage
 
@@ -65,17 +65,15 @@ router = APIRouter()
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_resume(
-    db: DbSession,
+    db: DbSession,  # noqa: ARG001 - kept for future per-upload DB writes
     current_user: Annotated[User, Depends(require_role(UserRole.candidate))],
     file: UploadFile = File(..., description="PDF, DOC, or DOCX resume (max 15 MB)."),
-    job_id: int | None = None,
 ) -> ResumeUploadOut:
-    """Upload a resume binary to object storage; return the key + autofill.
+    """Upload a resume binary to object storage; return the key.
 
-    `job_id` is optional — when present, the skills-autofill cross-references
-    the resume text against THAT job's required skills so the suggestion is
-    targeted. Without it, the autofill returns an empty skills list (rather
-    than dumping every tech term it found).
+    The candidate then submits this key via `PUT /api/profile` to attach
+    it to their profile. Applications snapshot the profile's resume at
+    apply time — there's no per-application resume upload.
     """
     settings = get_settings()
     max_bytes = settings.resume_max_bytes
@@ -100,8 +98,6 @@ async def upload_resume(
         )
 
     # ----- read body with the size cap as a guard -----
-    # We read one extra byte; if it's there, the upload exceeds the cap
-    # and we abort without storing anything.
     body = await file.read(max_bytes + 1)
     if len(body) > max_bytes:
         raise HTTPException(
@@ -121,39 +117,11 @@ async def upload_resume(
         filename=original_name,
     )
 
-    # ----- extract text + build autofill suggestion -----
-    resume_text = extract_text(filename=original_name, body=body)
-    autofill = AutofillOut(skills=[], years_experience=None)
-    if job_id is not None and resume_text:
-        # Look up the job's required skills to scope the skill autofill.
-        # No ownership check here: candidates can target any job they're
-        # browsing.
-        from app.models import Job  # local import to avoid widening top-level imports
-
-        job = db.get(Job, job_id)
-        if job is not None:
-            suggestion = suggest_autofill(
-                resume_text=resume_text, job_skills=job.skills or []
-            )
-            autofill = AutofillOut(
-                skills=suggestion.skills,
-                years_experience=suggestion.years_experience,
-            )
-    elif resume_text:
-        # No job context — still try YOE, but skip skill autofill.
-        from app.services.resume_text import _guess_yoe  # noqa: PLC2701
-
-        autofill = AutofillOut(
-            skills=[],
-            years_experience=_guess_yoe(resume_text.lower()),
-        )
-
     return ResumeUploadOut(
         resume_key=key,
         filename=original_name,
         size_bytes=len(body),
         content_type=content_type or "application/octet-stream",
-        autofill=autofill,
     )
 
 

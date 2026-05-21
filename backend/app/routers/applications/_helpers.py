@@ -108,8 +108,13 @@ def detail(application: Application, *, include_identity: bool = False) -> Appli
             ).model_dump()
         else:
             base["resume"] = None
+        # profile_snapshot (is_fresher + experience + education) is
+        # identity-bearing — companies/institutions identify people —
+        # so it only goes through on the drawer-fetch path.
+        base["profile_snapshot"] = application.profile_snapshot
     else:
         base["resume"] = None
+        base["profile_snapshot"] = None
     return ApplicationDetail(
         **base,
         job=JobMini.model_validate(application.job) if application.job else None,
