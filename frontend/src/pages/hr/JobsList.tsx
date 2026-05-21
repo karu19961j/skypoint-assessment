@@ -99,6 +99,7 @@ export function HrJobsListPage() {
                   className="input max-w-[140px] py-1 text-xs"
                   value={j.status}
                   onChange={(e) => setStatus(j.id, e.target.value as JobStatus)}
+                  aria-label={`Change status for ${j.title}`}
                 >
                   <option value="active">Active</option>
                   <option value="paused">Paused</option>
