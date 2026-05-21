@@ -4,6 +4,9 @@ A full-stack hiring portal built for the Skypoint Cloud Claude Code assessment. 
 
 [![CI](https://github.com/karu19961j/skypoint-assessment/actions/workflows/ci.yml/badge.svg)](https://github.com/karu19961j/skypoint-assessment/actions/workflows/ci.yml)
 
+![HR Dashboard — stage volume strip + Top 5 jobs funnel](docs/screenshots/01-hr-dashboard.png)
+<p align="center"><em>HR Dashboard — pipeline volume across all jobs + Top 5 jobs by application count, each row linking to the per-job applicants view.</em></p>
+
 ---
 
 ## 1. Project overview

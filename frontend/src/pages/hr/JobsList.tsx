@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
 import { jobsApi } from "@/api/endpoints";
@@ -21,6 +21,8 @@ const STATUS_COLOR: Record<JobStatus, string> = {
 export function HrJobsListPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
+  const navigate = useNavigate();
 
   const refresh = () => {
     jobsApi
@@ -55,6 +57,36 @@ export function HrJobsListPage() {
       refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Could not close job");
+    }
+  };
+
+  const duplicate = async (id: number) => {
+    // Clone the posting into a new draft. The new job is created as Paused
+    // (status flipped post-create) so the candidate listings don't show a
+    // half-edited duplicate while HR is still tweaking the copy.
+    setError(null);
+    setDuplicatingId(id);
+    try {
+      const source = await jobsApi.get(id);
+      const draft = await jobsApi.create({
+        title: `${source.title} (copy)`,
+        description: source.description,
+        department: source.department,
+        location_type: source.location_type,
+        employment_type: source.employment_type,
+        exp_min: source.exp_min,
+        exp_max: source.exp_max,
+        ctc_min: source.ctc_min,
+        ctc_max: source.ctc_max,
+        skills: source.skills,
+        deadline: source.deadline,
+      });
+      await jobsApi.setStatus(draft.id, "paused");
+      navigate(`/hr/jobs/${draft.id}/edit`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : "Could not duplicate job");
+    } finally {
+      setDuplicatingId(null);
     }
   };
 
@@ -101,6 +133,15 @@ export function HrJobsListPage() {
                 <Link to={`/hr/jobs/${j.id}/edit`} className="btn-secondary text-xs">
                   Edit
                 </Link>
+                <button
+                  onClick={() => duplicate(j.id)}
+                  disabled={duplicatingId !== null}
+                  className="btn-secondary text-xs"
+                  title="Create a paused copy of this posting"
+                  aria-label={`Duplicate ${j.title}`}
+                >
+                  {duplicatingId === j.id ? "Duplicating…" : "⧉ Duplicate"}
+                </button>
                 <select
                   className="input max-w-[140px] py-1 text-xs"
                   value={j.status}
