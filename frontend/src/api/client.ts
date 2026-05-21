@@ -25,6 +25,17 @@ interface RequestOptions {
   body?: unknown;
   query?: Record<string, unknown>;
   signal?: AbortSignal;
+  // Opt out of the global 401 interceptor (used by login/register so a 401
+  // from "wrong password" doesn't trigger a redirect loop on the page that
+  // already shows the login form).
+  skipAuthRedirect?: boolean;
+}
+
+let onUnauthorized: (() => void) | null = null;
+
+/** Wire up a global hook to be called when an authenticated request returns 401. */
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
 }
 
 function buildQuery(params: Record<string, unknown> | undefined): string {
@@ -83,6 +94,20 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
           ? JSON.stringify((payload as { detail: unknown }).detail)
           : String((payload as { detail: unknown }).detail)
         : String(payload);
+
+    // Token-expired / invalidated mid-session: clear it and notify the app
+    // so it can redirect to /login. Skip on requests that legitimately may
+    // return 401 (login/register attempts with wrong creds).
+    if (
+      resp.status === 401 &&
+      token !== null &&
+      !opts.skipAuthRedirect &&
+      onUnauthorized
+    ) {
+      setToken(null);
+      onUnauthorized();
+    }
+
     throw new ApiError(resp.status, detail);
   }
   return payload as T;

@@ -9,6 +9,7 @@ import { BookmarksPage } from "@/pages/candidate/Bookmarks";
 import { CandidateJobDetailPage } from "@/pages/candidate/JobDetail";
 import { CandidateJobsPage } from "@/pages/candidate/JobsBrowse";
 import { MyApplicationsPage } from "@/pages/candidate/MyApplications";
+import { HrAllApplicantsPage } from "@/pages/hr/AllApplicants";
 import { HrDashboardPage } from "@/pages/hr/Dashboard";
 import { HrJobApplicantsPage } from "@/pages/hr/JobApplicants";
 import { HrJobFormPage } from "@/pages/hr/JobForm";
@@ -41,6 +42,7 @@ export function App() {
 
             <Route element={<ProtectedRoute roles={["hr"]} />}>
               <Route path="/hr" element={<HrDashboardPage />} />
+              <Route path="/hr/applicants" element={<HrAllApplicantsPage />} />
               <Route path="/hr/jobs" element={<HrJobsListPage />} />
               <Route path="/hr/jobs/new" element={<HrJobFormPage />} />
               <Route path="/hr/jobs/:id/edit" element={<HrJobFormPage />} />

@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { ApiError, getToken, setToken } from "@/api/client";
+import { ApiError, getToken, setToken, setUnauthorizedHandler } from "@/api/client";
 import { authApi } from "@/api/endpoints";
 import type { TokenResponse, User } from "@/api/types";
 
@@ -74,6 +74,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
+  }, []);
+
+  // When any authenticated request returns 401 (token expired / revoked),
+  // surface that as a clean logout + redirect to /login.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+        window.location.assign("/login");
+      }
+    });
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   const value = useMemo(

@@ -20,6 +20,7 @@ export const authApi = {
     return apiFetch<TokenResponse>("/auth/login", {
       method: "POST",
       body: { email, password },
+      skipAuthRedirect: true,
     });
   },
   register(payload: {
@@ -31,6 +32,7 @@ export const authApi = {
     return apiFetch<TokenResponse>("/auth/register", {
       method: "POST",
       body: payload,
+      skipAuthRedirect: true,
     });
   },
   me() {
@@ -93,6 +95,11 @@ export interface ApplicantFilters {
   sort?: "recent" | "expected_ctc" | "notice" | "experience";
 }
 
+export interface CrossJobApplicantFilters extends ApplicantFilters {
+  /** Scope to a specific job (must be owned by the requesting HR). */
+  job_id?: number;
+}
+
 export const applicationsApi = {
   apply(payload: ApplicationCreate) {
     return apiFetch<Application>("/applications/", { method: "POST", body: payload });
@@ -105,6 +112,11 @@ export const applicationsApi = {
   },
   byJob(jobId: number, filters: ApplicantFilters = {}) {
     return apiFetch<Application[]>(`/applications/by-job/${jobId}`, {
+      query: filters as Record<string, unknown>,
+    });
+  },
+  all(filters: CrossJobApplicantFilters = {}) {
+    return apiFetch<Application[]>("/applications/all", {
       query: filters as Record<string, unknown>,
     });
   },

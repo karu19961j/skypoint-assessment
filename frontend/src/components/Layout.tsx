@@ -13,6 +13,7 @@ export function Layout() {
   const hrLinks = [
     { to: "/hr", label: "Dashboard" },
     { to: "/hr/jobs", label: "Jobs" },
+    { to: "/hr/applicants", label: "Candidates" },
   ];
 
   const links = user?.role === "hr" ? hrLinks : candidateLinks;

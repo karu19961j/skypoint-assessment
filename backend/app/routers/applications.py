@@ -1,8 +1,10 @@
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, select
+from sqlalchemy import Select, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.deps import DbSession, require_role
@@ -48,6 +50,81 @@ def _get_application_or_404(db: Session, app_id: int) -> Application:
     return app
 
 
+@dataclass
+class _ApplicantFilters:
+    stage: ApplicationStage | None = None
+    skills_any: list[str] | None = None
+    skills_all: list[str] | None = None
+    exp_min: int | None = None
+    exp_max: int | None = None
+    current_ctc_min: int | None = None
+    current_ctc_max: int | None = None
+    expected_ctc_min: int | None = None
+    expected_ctc_max: int | None = None
+    notice_max_days: int | None = None
+    applied_after: date | None = None
+    applied_before: date | None = None
+    q: str | None = None
+    sort: str = "recent"
+
+
+def _apply_filters(stmt: Select[tuple[Application]], f: _ApplicantFilters) -> Select[tuple[Application]]:
+    if f.stage is not None:
+        stmt = stmt.where(Application.stage == f.stage)
+    if f.skills_any:
+        normalized = [s.strip() for s in f.skills_any if s and s.strip()]
+        if normalized:
+            stmt = stmt.where(Application.skills.op("&&")(normalized))
+    if f.skills_all:
+        normalized = [s.strip() for s in f.skills_all if s and s.strip()]
+        if normalized:
+            stmt = stmt.where(Application.skills.op("@>")(normalized))
+    if f.exp_min is not None:
+        stmt = stmt.where(Application.years_experience >= f.exp_min)
+    if f.exp_max is not None:
+        stmt = stmt.where(Application.years_experience <= f.exp_max)
+    if f.current_ctc_min is not None:
+        stmt = stmt.where(Application.current_ctc >= f.current_ctc_min)
+    if f.current_ctc_max is not None:
+        stmt = stmt.where(Application.current_ctc <= f.current_ctc_max)
+    if f.expected_ctc_min is not None:
+        stmt = stmt.where(Application.expected_ctc >= f.expected_ctc_min)
+    if f.expected_ctc_max is not None:
+        stmt = stmt.where(Application.expected_ctc <= f.expected_ctc_max)
+    if f.notice_max_days is not None:
+        stmt = stmt.where(Application.notice_period_days <= f.notice_max_days)
+    if f.applied_after is not None:
+        stmt = stmt.where(
+            Application.created_at
+            >= datetime.combine(f.applied_after, datetime.min.time(), tzinfo=timezone.utc)
+        )
+    if f.applied_before is not None:
+        stmt = stmt.where(
+            Application.created_at
+            < datetime.combine(
+                f.applied_before + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+            )
+        )
+    if f.q:
+        like = f"%{f.q.lower()}%"
+        stmt = stmt.where(
+            or_(
+                Application.cover_note.ilike(like),
+                Application.skills.op("&&")([f.q.strip()]),
+            )
+        )
+
+    if f.sort == "expected_ctc":
+        stmt = stmt.order_by(Application.expected_ctc.asc())
+    elif f.sort == "notice":
+        stmt = stmt.order_by(Application.notice_period_days.asc())
+    elif f.sort == "experience":
+        stmt = stmt.order_by(Application.years_experience.desc())
+    else:
+        stmt = stmt.order_by(Application.created_at.desc())
+    return stmt
+
+
 @router.post("/", response_model=ApplicationOut, status_code=status.HTTP_201_CREATED)
 def apply(
     payload: ApplicationCreate,
@@ -82,17 +159,27 @@ def apply(
         stage=ApplicationStage.applied,
     )
     db.add(application)
-    db.flush()  # populate application.id before inserting the event
-
-    db.add(
-        ApplicationEvent(
-            application_id=application.id,
-            from_stage=None,
-            to_stage=ApplicationStage.applied,
-            changed_by_user_id=current_user.id,
+    try:
+        db.flush()  # populate application.id before inserting the event
+        db.add(
+            ApplicationEvent(
+                application_id=application.id,
+                from_stage=None,
+                to_stage=ApplicationStage.applied,
+                changed_by_user_id=current_user.id,
+            )
         )
-    )
-    db.commit()
+        db.commit()
+    except IntegrityError:
+        # Race: another request inserted the same (job_id, candidate_id) row
+        # between our SELECT and INSERT. The unique constraint is the source
+        # of truth — translate it back into the same 409 the SELECT path
+        # would have raised.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You have already applied to this job.",
+        ) from None
     db.refresh(application)
     return ApplicationOut.model_validate(application)
 
@@ -136,6 +223,40 @@ def withdraw_application(
     db.commit()
 
 
+def _filters_from_query(
+    stage: ApplicationStage | None,
+    skills_any: list[str] | None,
+    skills_all: list[str] | None,
+    exp_min: int | None,
+    exp_max: int | None,
+    current_ctc_min: int | None,
+    current_ctc_max: int | None,
+    expected_ctc_min: int | None,
+    expected_ctc_max: int | None,
+    notice_max_days: int | None,
+    applied_after: date | None,
+    applied_before: date | None,
+    q: str | None,
+    sort: str,
+) -> _ApplicantFilters:
+    return _ApplicantFilters(
+        stage=stage,
+        skills_any=skills_any,
+        skills_all=skills_all,
+        exp_min=exp_min,
+        exp_max=exp_max,
+        current_ctc_min=current_ctc_min,
+        current_ctc_max=current_ctc_max,
+        expected_ctc_min=expected_ctc_min,
+        expected_ctc_max=expected_ctc_max,
+        notice_max_days=notice_max_days,
+        applied_after=applied_after,
+        applied_before=applied_before,
+        q=q,
+        sort=sort,
+    )
+
+
 @router.get("/by-job/{job_id}", response_model=list[ApplicationDetail])
 def list_applicants(
     job_id: int,
@@ -165,54 +286,67 @@ def list_applicants(
     if job.hr_id != current_user.id:
         raise HTTPException(status_code=403, detail="You do not own this job.")
 
-    stmt = select(Application).where(Application.job_id == job_id)
+    filters = _filters_from_query(
+        stage, skills_any, skills_all, exp_min, exp_max,
+        current_ctc_min, current_ctc_max, expected_ctc_min, expected_ctc_max,
+        notice_max_days, applied_after, applied_before, q, sort,
+    )
+    stmt = _apply_filters(
+        select(Application).where(Application.job_id == job_id), filters
+    )
+    apps = db.scalars(stmt).all()
+    return [_detail(a) for a in apps]
 
-    if stage is not None:
-        stmt = stmt.where(Application.stage == stage)
-    if skills_any:
-        normalized = [s.strip() for s in skills_any if s and s.strip()]
-        if normalized:
-            stmt = stmt.where(Application.skills.op("&&")(normalized))
-    if skills_all:
-        normalized = [s.strip() for s in skills_all if s and s.strip()]
-        if normalized:
-            stmt = stmt.where(Application.skills.op("@>")(normalized))
-    if exp_min is not None:
-        stmt = stmt.where(Application.years_experience >= exp_min)
-    if exp_max is not None:
-        stmt = stmt.where(Application.years_experience <= exp_max)
-    if current_ctc_min is not None:
-        stmt = stmt.where(Application.current_ctc >= current_ctc_min)
-    if current_ctc_max is not None:
-        stmt = stmt.where(Application.current_ctc <= current_ctc_max)
-    if expected_ctc_min is not None:
-        stmt = stmt.where(Application.expected_ctc >= expected_ctc_min)
-    if expected_ctc_max is not None:
-        stmt = stmt.where(Application.expected_ctc <= expected_ctc_max)
-    if notice_max_days is not None:
-        stmt = stmt.where(Application.notice_period_days <= notice_max_days)
-    if applied_after is not None:
-        stmt = stmt.where(Application.created_at >= datetime.combine(applied_after, datetime.min.time(), tzinfo=timezone.utc))
-    if applied_before is not None:
-        stmt = stmt.where(Application.created_at < datetime.combine(applied_before + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))
-    if q:
-        like = f"%{q.lower()}%"
-        stmt = stmt.where(
-            or_(
-                Application.cover_note.ilike(like),
-                Application.skills.op("&&")([q.strip()]),
+
+@router.get("/all", response_model=list[ApplicationDetail])
+def list_all_my_applicants(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_role(UserRole.hr))],
+    job_id: int | None = Query(default=None, description="Scope to a single job (must be owned by the HR)."),
+    stage: ApplicationStage | None = None,
+    skills_any: list[str] | None = Query(default=None),
+    skills_all: list[str] | None = Query(default=None),
+    exp_min: int | None = Query(default=None, ge=0),
+    exp_max: int | None = Query(default=None, ge=0),
+    current_ctc_min: int | None = Query(default=None, ge=0),
+    current_ctc_max: int | None = Query(default=None, ge=0),
+    expected_ctc_min: int | None = Query(default=None, ge=0),
+    expected_ctc_max: int | None = Query(default=None, ge=0),
+    notice_max_days: int | None = Query(default=None, ge=0),
+    applied_after: date | None = None,
+    applied_before: date | None = None,
+    q: str | None = None,
+    sort: str = Query(
+        default="recent",
+        pattern="^(recent|expected_ctc|notice|experience)$",
+    ),
+) -> list[ApplicationDetail]:
+    """Cross-job applicant feed for the requesting HR.
+
+    Returns every application on every job owned by the requesting HR,
+    optionally scoped to a specific `job_id` (which must also be owned by
+    them). Same filter and sort surface as `/by-job/{id}`.
+    """
+    own_jobs_subq = (
+        select(Job.id).where(Job.hr_id == current_user.id).scalar_subquery()
+    )
+    stmt = select(Application).where(Application.job_id.in_(own_jobs_subq))
+
+    if job_id is not None:
+        job = db.get(Job, job_id)
+        if job is None or job.hr_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not own this job.",
             )
-        )
+        stmt = stmt.where(Application.job_id == job_id)
 
-    if sort == "expected_ctc":
-        stmt = stmt.order_by(Application.expected_ctc.asc())
-    elif sort == "notice":
-        stmt = stmt.order_by(Application.notice_period_days.asc())
-    elif sort == "experience":
-        stmt = stmt.order_by(Application.years_experience.desc())
-    else:
-        stmt = stmt.order_by(Application.created_at.desc())
-
+    filters = _filters_from_query(
+        stage, skills_any, skills_all, exp_min, exp_max,
+        current_ctc_min, current_ctc_max, expected_ctc_min, expected_ctc_max,
+        notice_max_days, applied_after, applied_before, q, sort,
+    )
+    stmt = _apply_filters(stmt, filters)
     apps = db.scalars(stmt).all()
     return [_detail(a) for a in apps]
 
