@@ -11,7 +11,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, utcnow
@@ -54,6 +54,12 @@ class Application(Base, TimestampMixin):
     resume_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     resume_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     resume_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSONB snapshot of the non-filterable parts of the candidate profile at
+    # apply time — is_fresher flag, prior experience rows, education rows.
+    # The HR drawer reads this for the candidate's history view. We keep
+    # the filterable fields (skills, ctc, exp, notice) as proper columns
+    # so applicant search still uses indexes.
+    profile_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     cover_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     current_ctc: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     expected_ctc: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

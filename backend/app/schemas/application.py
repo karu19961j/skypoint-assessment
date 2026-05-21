@@ -6,18 +6,13 @@ from app.models import ApplicationStage
 
 
 class ApplicationCreate(BaseModel):
+    """Apply payload. All candidate-side data (CTC, experience, skills,
+    education, resume) lives on the profile and gets snapshotted into
+    the application row at submit time. The only per-application input
+    is an optional cover note explaining *this* application."""
+
     job_id: int
-    # resume_key is returned by POST /api/resume/upload — the apply form
-    # uploads the file first and then submits the key with the rest of
-    # the structured fields. Nullable so a candidate can apply without a
-    # resume if they choose (cover note + profile may be enough).
-    resume_key: str | None = Field(default=None, max_length=255)
     cover_note: str = Field(default="", max_length=5000)
-    current_ctc: int = Field(ge=0)
-    expected_ctc: int = Field(ge=0)
-    notice_period_days: int = Field(ge=0, le=365)
-    years_experience: int = Field(ge=0, le=60)
-    skills: list[str] = Field(default_factory=list, max_length=30)
 
 
 class ApplicationStageUpdate(BaseModel):
@@ -50,6 +45,38 @@ class ResumeMeta(BaseModel):
     content_type: str | None = None
 
 
+class ExperienceSnapshot(BaseModel):
+    """Snapshot of one prior-experience row at apply time. Dates are
+    JSON-serialized as ISO strings because the snapshot lives in JSONB.
+    """
+
+    company: str
+    role: str
+    from_date: str
+    to_date: str | None
+    is_current: bool
+    description: str | None = None
+
+
+class EducationSnapshot(BaseModel):
+    institution: str
+    degree: str
+    field_of_study: str | None = None
+    from_year: int
+    to_year: int | None
+
+
+class ProfileSnapshotOut(BaseModel):
+    """Non-filterable profile data captured at apply time. The HR drawer
+    reads this to render the candidate's history. Filterable fields
+    (skills, ctc, exp, notice) stay as proper columns on the row so
+    applicant search still uses indexes."""
+
+    is_fresher: bool = False
+    experiences: list[ExperienceSnapshot] = []
+    educations: list[EducationSnapshot] = []
+
+
 class ApplicationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -63,6 +90,7 @@ class ApplicationOut(BaseModel):
     notice_period_days: int
     years_experience: int
     skills: list[str]
+    profile_snapshot: ProfileSnapshotOut | None = None
     stage: ApplicationStage
     created_at: datetime
     updated_at: datetime
@@ -117,21 +145,12 @@ class RankedApplicationOut(ApplicationDetail):
 # ---------- resume upload payloads ----------
 
 
-class AutofillOut(BaseModel):
-    """What the apply form pre-fills after a successful upload. Empty
-    fields = "we couldn't tell" — the form leaves the user's current
-    value alone in those cases."""
-
-    skills: list[str] = []
-    years_experience: int | None = None
-
-
 class ResumeUploadOut(BaseModel):
     """Response of POST /api/resume/upload. The candidate's next step is
-    to POST /api/applications/ with `resume_key` plus their form fields."""
+    to submit this key via PUT /api/profile so the resume is attached
+    to their profile and gets snapshotted into every future application."""
 
     resume_key: str
     filename: str
     size_bytes: int
     content_type: str
-    autofill: AutofillOut
