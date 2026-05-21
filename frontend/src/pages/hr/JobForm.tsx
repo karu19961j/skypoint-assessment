@@ -7,7 +7,7 @@ import { z } from "zod";
 import { ApiError } from "@/api/client";
 import { jobsApi } from "@/api/endpoints";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { splitCsv } from "@/lib/format";
+import { TagInput } from "@/components/TagInput";
 
 const schema = z
   .object({
@@ -20,7 +20,6 @@ const schema = z
     exp_max: z.coerce.number().int().min(0).max(60),
     ctc_min: z.coerce.number().int().min(0),
     ctc_max: z.coerce.number().int().min(0),
-    skills: z.string(),
     deadline: z.string().optional(),
   })
   .refine((d) => d.exp_max >= d.exp_min, {
@@ -39,6 +38,9 @@ export function HrJobFormPage() {
   const editingId = id ? Number(id) : null;
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
+  // Skills live outside react-hook-form because they're a pill-list, not a
+  // single input. Sync on load (edit) and read on submit.
+  const [skills, setSkills] = useState<string[]>([]);
 
   const {
     register,
@@ -57,7 +59,6 @@ export function HrJobFormPage() {
       exp_max: 0,
       ctc_min: 0,
       ctc_max: 0,
-      skills: "",
       deadline: "",
     },
   });
@@ -66,7 +67,7 @@ export function HrJobFormPage() {
     if (editingId === null) return;
     jobsApi
       .get(editingId)
-      .then((j) =>
+      .then((j) => {
         reset({
           title: j.title,
           description: j.description,
@@ -77,10 +78,10 @@ export function HrJobFormPage() {
           exp_max: j.exp_max,
           ctc_min: j.ctc_min,
           ctc_max: j.ctc_max,
-          skills: j.skills.join(", "),
           deadline: j.deadline ?? "",
-        }),
-      )
+        });
+        setSkills(j.skills);
+      })
       .catch((err) => setError(err instanceof ApiError ? err.detail : "Failed to load"));
   }, [editingId, reset]);
 
@@ -96,7 +97,7 @@ export function HrJobFormPage() {
       exp_max: values.exp_max,
       ctc_min: values.ctc_min,
       ctc_max: values.ctc_max,
-      skills: splitCsv(values.skills),
+      skills,
       deadline: values.deadline ? values.deadline : null,
     };
     try {
@@ -115,42 +116,72 @@ export function HrJobFormPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <h1 className="text-2xl font-semibold">{editingId ? "Edit job" : "Post a new job"}</h1>
 
-      <form onSubmit={onSubmit} className="card space-y-4">
+      <form onSubmit={onSubmit} className="card space-y-4" noValidate>
         <ErrorBanner message={error} />
 
         <div>
-          <label className="label">Title</label>
-          <input className="input" {...register("title")} />
-          {errors.title && <p className="mt-1 text-xs text-rose-600">{errors.title.message}</p>}
+          <label className="label" htmlFor="job-title">Title</label>
+          <input
+            id="job-title"
+            className="input"
+            aria-invalid={errors.title ? "true" : undefined}
+            aria-describedby={errors.title ? "job-title-error" : undefined}
+            {...register("title")}
+          />
+          {errors.title && (
+            <p id="job-title-error" role="alert" className="mt-1 text-xs text-rose-600">
+              {errors.title.message}
+            </p>
+          )}
         </div>
 
         <div>
-          <label className="label">Description</label>
-          <textarea className="input min-h-[150px]" {...register("description")} />
-          {errors.description && <p className="mt-1 text-xs text-rose-600">{errors.description.message}</p>}
+          <label className="label" htmlFor="job-description">Description</label>
+          <textarea
+            id="job-description"
+            className="input min-h-[150px]"
+            aria-invalid={errors.description ? "true" : undefined}
+            aria-describedby={errors.description ? "job-description-error" : undefined}
+            {...register("description")}
+          />
+          {errors.description && (
+            <p id="job-description-error" role="alert" className="mt-1 text-xs text-rose-600">
+              {errors.description.message}
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="label">Department</label>
-            <input className="input" {...register("department")} />
-            {errors.department && <p className="mt-1 text-xs text-rose-600">{errors.department.message}</p>}
+            <label className="label" htmlFor="job-department">Department</label>
+            <input
+              id="job-department"
+              className="input"
+              aria-invalid={errors.department ? "true" : undefined}
+              aria-describedby={errors.department ? "job-department-error" : undefined}
+              {...register("department")}
+            />
+            {errors.department && (
+              <p id="job-department-error" role="alert" className="mt-1 text-xs text-rose-600">
+                {errors.department.message}
+              </p>
+            )}
           </div>
           <div>
-            <label className="label">Application deadline</label>
-            <input className="input" type="date" {...register("deadline")} />
+            <label className="label" htmlFor="job-deadline">Application deadline</label>
+            <input id="job-deadline" className="input" type="date" {...register("deadline")} />
           </div>
           <div>
-            <label className="label">Location</label>
-            <select className="input" {...register("location_type")}>
+            <label className="label" htmlFor="job-location">Location</label>
+            <select id="job-location" className="input" {...register("location_type")}>
               <option value="remote">Remote</option>
               <option value="hybrid">Hybrid</option>
               <option value="onsite">On-site</option>
             </select>
           </div>
           <div>
-            <label className="label">Employment type</label>
-            <select className="input" {...register("employment_type")}>
+            <label className="label" htmlFor="job-employment">Employment type</label>
+            <select id="job-employment" className="input" {...register("employment_type")}>
               <option value="full_time">Full-time</option>
               <option value="part_time">Part-time</option>
               <option value="contract">Contract</option>
@@ -161,28 +192,58 @@ export function HrJobFormPage() {
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="label">Min exp (yrs)</label>
-            <input className="input" type="number" min={0} {...register("exp_min")} />
+            <label className="label" htmlFor="job-exp-min">Min exp (yrs)</label>
+            <input id="job-exp-min" className="input" type="number" min={0} {...register("exp_min")} />
           </div>
           <div>
-            <label className="label">Max exp</label>
-            <input className="input" type="number" min={0} {...register("exp_max")} />
-            {errors.exp_max && <p className="mt-1 text-xs text-rose-600">{errors.exp_max.message}</p>}
+            <label className="label" htmlFor="job-exp-max">Max exp</label>
+            <input
+              id="job-exp-max"
+              className="input"
+              type="number"
+              min={0}
+              aria-invalid={errors.exp_max ? "true" : undefined}
+              aria-describedby={errors.exp_max ? "job-exp-max-error" : undefined}
+              {...register("exp_max")}
+            />
+            {errors.exp_max && (
+              <p id="job-exp-max-error" role="alert" className="mt-1 text-xs text-rose-600">
+                {errors.exp_max.message}
+              </p>
+            )}
           </div>
           <div>
-            <label className="label">Min CTC (₹)</label>
-            <input className="input" type="number" min={0} {...register("ctc_min")} />
+            <label className="label" htmlFor="job-ctc-min">Min CTC (₹)</label>
+            <input id="job-ctc-min" className="input" type="number" min={0} {...register("ctc_min")} />
           </div>
           <div>
-            <label className="label">Max CTC (₹)</label>
-            <input className="input" type="number" min={0} {...register("ctc_max")} />
-            {errors.ctc_max && <p className="mt-1 text-xs text-rose-600">{errors.ctc_max.message}</p>}
+            <label className="label" htmlFor="job-ctc-max">Max CTC (₹)</label>
+            <input
+              id="job-ctc-max"
+              className="input"
+              type="number"
+              min={0}
+              aria-invalid={errors.ctc_max ? "true" : undefined}
+              aria-describedby={errors.ctc_max ? "job-ctc-max-error" : undefined}
+              {...register("ctc_max")}
+            />
+            {errors.ctc_max && (
+              <p id="job-ctc-max-error" role="alert" className="mt-1 text-xs text-rose-600">
+                {errors.ctc_max.message}
+              </p>
+            )}
           </div>
         </div>
 
         <div>
-          <label className="label">Skills (comma-separated)</label>
-          <input className="input" placeholder="python, fastapi, postgres" {...register("skills")} />
+          <label className="label" htmlFor="job-skills">Required skills</label>
+          <TagInput
+            id="job-skills"
+            value={skills}
+            onChange={setSkills}
+            placeholder="Type a skill and press Enter (e.g. python, fastapi, postgres)"
+            ariaLabel="Required skills"
+          />
         </div>
 
         <div className="flex justify-end gap-2">

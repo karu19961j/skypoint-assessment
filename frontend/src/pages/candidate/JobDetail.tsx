@@ -9,12 +9,12 @@ import { applicationsApi, bookmarksApi, jobsApi } from "@/api/endpoints";
 import type { Job } from "@/api/types";
 import { DeadlinePill } from "@/components/DeadlinePill";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { TagInput } from "@/components/TagInput";
 import {
   employmentLabel,
   formatCtcRange,
   formatExp,
   locationLabel,
-  splitCsv,
 } from "@/lib/format";
 
 const applySchema = z.object({
@@ -24,7 +24,6 @@ const applySchema = z.object({
   expected_ctc: z.coerce.number().int().min(0),
   notice_period_days: z.coerce.number().int().min(0).max(365),
   years_experience: z.coerce.number().int().min(0).max(60),
-  skills: z.string(),
 });
 
 type ApplyValues = z.infer<typeof applySchema>;
@@ -38,6 +37,7 @@ export function CandidateJobDetailPage() {
   const [applied, setApplied] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [skills, setSkills] = useState<string[]>([]);
 
   const {
     register,
@@ -53,7 +53,6 @@ export function CandidateJobDetailPage() {
       expected_ctc: 0,
       notice_period_days: 30,
       years_experience: 0,
-      skills: "",
     },
   });
 
@@ -101,10 +100,11 @@ export function CandidateJobDetailPage() {
         expected_ctc: values.expected_ctc,
         notice_period_days: values.notice_period_days,
         years_experience: values.years_experience,
-        skills: splitCsv(values.skills),
+        skills,
       });
       setApplied(true);
       setShowForm(false);
+      setSkills([]);
       reset();
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Failed to apply");
@@ -163,43 +163,96 @@ export function CandidateJobDetailPage() {
       </div>
 
       {showForm && !applied ? (
-        <form onSubmit={onApply} className="card space-y-4">
+        <form onSubmit={onApply} className="card space-y-4" noValidate>
           <h2 className="text-lg font-semibold">Apply to {job.title}</h2>
           <ErrorBanner message={error} />
 
           <div>
-            <label className="label">Resume link</label>
-            <input className="input" placeholder="https://…" {...register("resume_link")} />
-            {errors.resume_link && <p className="mt-1 text-xs text-rose-600">{errors.resume_link.message}</p>}
+            <label className="label" htmlFor="apply-resume">Resume link</label>
+            <input
+              id="apply-resume"
+              className="input"
+              placeholder="https://…"
+              aria-invalid={errors.resume_link ? "true" : undefined}
+              aria-describedby={errors.resume_link ? "apply-resume-error" : undefined}
+              {...register("resume_link")}
+            />
+            {errors.resume_link && (
+              <p id="apply-resume-error" role="alert" className="mt-1 text-xs text-rose-600">
+                {errors.resume_link.message}
+              </p>
+            )}
           </div>
           <div>
-            <label className="label">Cover note</label>
-            <textarea className="input min-h-[120px]" {...register("cover_note")} />
-            {errors.cover_note && <p className="mt-1 text-xs text-rose-600">{errors.cover_note.message}</p>}
+            <label className="label" htmlFor="apply-cover">Cover note</label>
+            <textarea
+              id="apply-cover"
+              className="input min-h-[120px]"
+              aria-invalid={errors.cover_note ? "true" : undefined}
+              aria-describedby={errors.cover_note ? "apply-cover-error" : undefined}
+              {...register("cover_note")}
+            />
+            {errors.cover_note && (
+              <p id="apply-cover-error" role="alert" className="mt-1 text-xs text-rose-600">
+                {errors.cover_note.message}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="label">Years of experience</label>
-              <input className="input" type="number" min={0} {...register("years_experience")} />
+              <label className="label" htmlFor="apply-yoe">Years of experience</label>
+              <input
+                id="apply-yoe"
+                className="input"
+                type="number"
+                min={0}
+                aria-invalid={errors.years_experience ? "true" : undefined}
+                {...register("years_experience")}
+              />
             </div>
             <div>
-              <label className="label">Notice period (days)</label>
-              <input className="input" type="number" min={0} {...register("notice_period_days")} />
+              <label className="label" htmlFor="apply-notice">Notice period (days)</label>
+              <input
+                id="apply-notice"
+                className="input"
+                type="number"
+                min={0}
+                aria-invalid={errors.notice_period_days ? "true" : undefined}
+                {...register("notice_period_days")}
+              />
             </div>
             <div>
-              <label className="label">Current CTC (₹)</label>
-              <input className="input" type="number" min={0} {...register("current_ctc")} />
+              <label className="label" htmlFor="apply-current-ctc">Current CTC (₹)</label>
+              <input
+                id="apply-current-ctc"
+                className="input"
+                type="number"
+                min={0}
+                {...register("current_ctc")}
+              />
             </div>
             <div>
-              <label className="label">Expected CTC (₹)</label>
-              <input className="input" type="number" min={0} {...register("expected_ctc")} />
+              <label className="label" htmlFor="apply-expected-ctc">Expected CTC (₹)</label>
+              <input
+                id="apply-expected-ctc"
+                className="input"
+                type="number"
+                min={0}
+                {...register("expected_ctc")}
+              />
             </div>
           </div>
 
           <div>
-            <label className="label">Key skills (comma-separated)</label>
-            <input className="input" placeholder="python, fastapi" {...register("skills")} />
+            <label className="label" htmlFor="apply-skills">Key skills</label>
+            <TagInput
+              id="apply-skills"
+              value={skills}
+              onChange={setSkills}
+              placeholder="Type a skill and press Enter (e.g. python, fastapi)"
+              ariaLabel="Your key skills"
+            />
           </div>
 
           <div className="flex justify-end gap-2">

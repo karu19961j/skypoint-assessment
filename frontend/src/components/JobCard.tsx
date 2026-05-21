@@ -9,11 +9,19 @@ import {
 import type { Job } from "@/api/types";
 import { DeadlinePill } from "./DeadlinePill";
 
-export function JobCard({ job, onBookmarkToggle, isBookmarked }: {
+export function JobCard({
+  job,
+  onBookmarkToggle,
+  isBookmarked,
+  matchedSkills,
+}: {
   job: Job;
   onBookmarkToggle?: () => void;
   isBookmarked?: boolean;
+  /** When provided (recommended view), these skills get an emerald chip. */
+  matchedSkills?: string[];
 }) {
+  const matched = new Set((matchedSkills ?? []).map((s) => s.toLowerCase()));
   return (
     <div className="card hover:shadow">
       <div className="flex items-start justify-between gap-4">
@@ -40,7 +48,14 @@ export function JobCard({ job, onBookmarkToggle, isBookmarked }: {
         <span className="badge bg-emerald-100 text-emerald-800">{formatCtcRange(job.ctc_min, job.ctc_max)}</span>
         <DeadlinePill deadline={job.deadline} />
         {job.skills.map((s) => (
-          <span key={s} className="badge bg-brand-50 text-brand-700">
+          <span
+            key={s}
+            className={`badge ${
+              matched.has(s.toLowerCase())
+                ? "bg-emerald-100 text-emerald-800"
+                : "bg-brand-50 text-brand-700"
+            }`}
+          >
             {s}
           </span>
         ))}

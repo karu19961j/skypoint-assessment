@@ -7,7 +7,9 @@ import type { EmploymentType, Job, LocationType, RecommendedJob } from "@/api/ty
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { JobCard } from "@/components/JobCard";
 import { ScoreBadge } from "@/components/ScoreBadge";
-import { splitCsv } from "@/lib/format";
+import { TagInput } from "@/components/TagInput";
+
+const PAGE_SIZE = 12;
 
 interface Filters {
   q: string;
@@ -18,7 +20,7 @@ interface Filters {
   exp_max: string;
   ctc_min: string;
   ctc_max: string;
-  skills: string;
+  skills: string[];
   sort: "recent" | "salary_high" | "exp_low";
 }
 
@@ -31,12 +33,16 @@ const EMPTY: Filters = {
   exp_max: "",
   ctc_min: "",
   ctc_max: "",
-  skills: "",
+  skills: [],
   sort: "recent",
 };
 
-function buildQuery(f: Filters): JobListFilters {
-  const q: JobListFilters = { sort: f.sort };
+function buildQuery(f: Filters, page: number): JobListFilters {
+  const q: JobListFilters = {
+    sort: f.sort,
+    limit: PAGE_SIZE + 1, // +1 acts as a "has next page" probe
+    offset: page * PAGE_SIZE,
+  };
   if (f.q.trim()) q.q = f.q.trim();
   if (f.location_type) q.location_type = f.location_type;
   if (f.employment_type) q.employment_type = f.employment_type;
@@ -45,8 +51,7 @@ function buildQuery(f: Filters): JobListFilters {
   if (f.exp_max) q.exp_max = Number(f.exp_max);
   if (f.ctc_min) q.ctc_min = Number(f.ctc_min);
   if (f.ctc_max) q.ctc_max = Number(f.ctc_max);
-  const skills = splitCsv(f.skills);
-  if (skills.length) q.skills = skills;
+  if (f.skills.length) q.skills = f.skills;
   return q;
 }
 
@@ -56,13 +61,20 @@ export function CandidateJobsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: Tab = searchParams.get("tab") === "recommended" ? "recommended" : "all";
   const [filters, setFilters] = useState<Filters>(EMPTY);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [jobs, setJobs] = useState<Job[] | RecommendedJob[]>([]);
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [noProfile, setNoProfile] = useState(false);
 
-  const query = useMemo(() => buildQuery(filters), [filters]);
+  const query = useMemo(() => buildQuery(filters, page), [filters, page]);
+
+  // Reset to page 1 on any filter or tab change.
+  useEffect(() => {
+    setPage(0);
+  }, [filters, tab]);
 
   useEffect(() => {
     setLoading(true);
@@ -72,7 +84,10 @@ export function CandidateJobsPage() {
     if (tab === "recommended") {
       jobsApi
         .recommended()
-        .then((rows) => setJobs(rows))
+        .then((rows) => {
+          setJobs(rows);
+          setHasMore(false);
+        })
         .catch((err) => {
           if (err instanceof ApiError) {
             if (err.status === 404) setNoProfile(true);
@@ -83,7 +98,12 @@ export function CandidateJobsPage() {
     } else {
       jobsApi
         .list(query)
-        .then((rows) => setJobs(rows))
+        .then((rows) => {
+          // We requested PAGE_SIZE+1; if we got the extra one, there's a
+          // next page available. Trim before render.
+          setHasMore(rows.length > PAGE_SIZE);
+          setJobs(rows.slice(0, PAGE_SIZE));
+        })
         .catch((err) => {
           if (err instanceof ApiError) setError(err.detail);
         })
@@ -132,8 +152,9 @@ export function CandidateJobsPage() {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
       <aside className="card h-fit space-y-4 lg:sticky lg:top-4">
         <div>
-          <label className="label">Search</label>
+          <label className="label" htmlFor="browse-q">Search</label>
           <input
+            id="browse-q"
             className="input"
             placeholder="Title or keyword"
             value={filters.q}
@@ -141,8 +162,9 @@ export function CandidateJobsPage() {
           />
         </div>
         <div>
-          <label className="label">Department</label>
+          <label className="label" htmlFor="browse-department">Department</label>
           <input
+            id="browse-department"
             className="input"
             placeholder="e.g. Engineering"
             value={filters.department}
@@ -150,8 +172,9 @@ export function CandidateJobsPage() {
           />
         </div>
         <div>
-          <label className="label">Location</label>
+          <label className="label" htmlFor="browse-location">Location</label>
           <select
+            id="browse-location"
             className="input"
             value={filters.location_type}
             onChange={(e) => update("location_type", e.target.value as Filters["location_type"])}
@@ -163,8 +186,9 @@ export function CandidateJobsPage() {
           </select>
         </div>
         <div>
-          <label className="label">Employment</label>
+          <label className="label" htmlFor="browse-employment">Employment</label>
           <select
+            id="browse-employment"
             className="input"
             value={filters.employment_type}
             onChange={(e) => update("employment_type", e.target.value as Filters["employment_type"])}
@@ -178,8 +202,9 @@ export function CandidateJobsPage() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="label">Min exp (yrs)</label>
+            <label className="label" htmlFor="browse-exp-min">Min exp (yrs)</label>
             <input
+              id="browse-exp-min"
               className="input"
               type="number"
               min={0}
@@ -188,8 +213,9 @@ export function CandidateJobsPage() {
             />
           </div>
           <div>
-            <label className="label">Max exp</label>
+            <label className="label" htmlFor="browse-exp-max">Max exp</label>
             <input
+              id="browse-exp-max"
               className="input"
               type="number"
               min={0}
@@ -200,8 +226,9 @@ export function CandidateJobsPage() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="label">Min CTC</label>
+            <label className="label" htmlFor="browse-ctc-min">Min CTC</label>
             <input
+              id="browse-ctc-min"
               className="input"
               type="number"
               min={0}
@@ -210,8 +237,9 @@ export function CandidateJobsPage() {
             />
           </div>
           <div>
-            <label className="label">Max CTC</label>
+            <label className="label" htmlFor="browse-ctc-max">Max CTC</label>
             <input
+              id="browse-ctc-max"
               className="input"
               type="number"
               min={0}
@@ -221,12 +249,13 @@ export function CandidateJobsPage() {
           </div>
         </div>
         <div>
-          <label className="label">Skills (comma-separated)</label>
-          <input
-            className="input"
-            placeholder="python, react"
+          <label className="label" htmlFor="browse-skills">Skills</label>
+          <TagInput
+            id="browse-skills"
             value={filters.skills}
-            onChange={(e) => update("skills", e.target.value)}
+            onChange={(next) => update("skills", next)}
+            placeholder="Type a skill and press Enter (e.g. python, react)"
+            ariaLabel="Filter jobs by skills"
           />
         </div>
         <div>
@@ -302,23 +331,54 @@ export function CandidateJobsPage() {
               : "No jobs match your filters."}
           </div>
         ) : (
-          jobs.map((j) => {
-            const recommended = "score" in j ? (j as RecommendedJob) : null;
-            return (
-              <div key={j.id} className="relative">
-                <JobCard
-                  job={j}
-                  isBookmarked={bookmarkedIds.has(j.id)}
-                  onBookmarkToggle={() => toggleBookmark(j.id)}
-                />
-                {recommended ? (
-                  <div className="absolute right-5 top-5">
-                    <ScoreBadge score={recommended.score} />
-                  </div>
-                ) : null}
-              </div>
-            );
-          })
+          <>
+            {jobs.map((j) => {
+              const recommended = "score" in j ? (j as RecommendedJob) : null;
+              return (
+                <div key={j.id} className="relative">
+                  <JobCard
+                    job={j}
+                    isBookmarked={bookmarkedIds.has(j.id)}
+                    onBookmarkToggle={() => toggleBookmark(j.id)}
+                    matchedSkills={recommended?.score.matched_skills}
+                  />
+                  {recommended ? (
+                    <div className="absolute right-5 top-5">
+                      <ScoreBadge score={recommended.score} />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            {tab === "all" && (page > 0 || hasMore) ? (
+              <nav
+                className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-sm ring-1 ring-slate-200"
+                aria-label="Pagination"
+              >
+                <button
+                  type="button"
+                  className="btn-secondary text-xs"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  aria-label="Previous page"
+                >
+                  ← Previous
+                </button>
+                <span className="text-slate-500" aria-live="polite">
+                  Page {page + 1}
+                </span>
+                <button
+                  type="button"
+                  className="btn-secondary text-xs"
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={!hasMore}
+                  aria-label="Next page"
+                >
+                  Next →
+                </button>
+              </nav>
+            ) : null}
+          </>
         )}
       </section>
     </div>

@@ -2,6 +2,22 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { ApiError, getToken } from "@/api/client";
+import { applicationsApi, jobsApi, type ApplicantFilters } from "@/api/endpoints";
+import type {
+  Application,
+  ApplicationScore,
+  ApplicationStage,
+  Job,
+  RankedApplication,
+} from "@/api/types";
+import { APPLICATION_STAGES } from "@/api/types";
+import { ErrorBanner } from "@/components/ErrorBanner";
+import { NotesDrawer } from "@/components/NotesDrawer";
+import { ScoreBadge } from "@/components/ScoreBadge";
+import { StageBadge } from "@/components/StageBadge";
+import { TagInput } from "@/components/TagInput";
+import { formatCtc, formatRelative, stageLabel } from "@/lib/format";
+
 async function downloadExport(jobId: number, filters: ApplicantFilters) {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(filters)) {
@@ -30,30 +46,11 @@ async function downloadExport(jobId: number, filters: ApplicantFilters) {
   document.body.removeChild(a);
   URL.revokeObjectURL(objectUrl);
 }
-import { applicationsApi, jobsApi, type ApplicantFilters } from "@/api/endpoints";
-import type {
-  Application,
-  ApplicationScore,
-  ApplicationStage,
-  Job,
-  RankedApplication,
-} from "@/api/types";
-import { APPLICATION_STAGES } from "@/api/types";
-import { ErrorBanner } from "@/components/ErrorBanner";
-import { NotesDrawer } from "@/components/NotesDrawer";
-import { ScoreBadge } from "@/components/ScoreBadge";
-import { StageBadge } from "@/components/StageBadge";
-import {
-  formatCtc,
-  formatRelative,
-  splitCsv,
-  stageLabel,
-} from "@/lib/format";
 
 interface FilterForm {
   stage: ApplicationStage | "";
-  skills_any: string;
-  skills_all: string;
+  skills_any: string[];
+  skills_all: string[];
   exp_min: string;
   exp_max: string;
   current_ctc_max: string;
@@ -67,8 +64,8 @@ interface FilterForm {
 
 const EMPTY_FILTERS: FilterForm = {
   stage: "",
-  skills_any: "",
-  skills_all: "",
+  skills_any: [],
+  skills_all: [],
   exp_min: "",
   exp_max: "",
   current_ctc_max: "",
@@ -83,10 +80,8 @@ const EMPTY_FILTERS: FilterForm = {
 function toApi(f: FilterForm): ApplicantFilters {
   const out: ApplicantFilters = { sort: f.sort };
   if (f.stage) out.stage = f.stage;
-  const any = splitCsv(f.skills_any);
-  if (any.length) out.skills_any = any;
-  const all = splitCsv(f.skills_all);
-  if (all.length) out.skills_all = all;
+  if (f.skills_any.length) out.skills_any = f.skills_any;
+  if (f.skills_all.length) out.skills_all = f.skills_all;
   if (f.exp_min) out.exp_min = Number(f.exp_min);
   if (f.exp_max) out.exp_max = Number(f.exp_max);
   if (f.current_ctc_max) out.current_ctc_max = Number(f.current_ctc_max);
@@ -170,8 +165,9 @@ export function HrJobApplicantsPage() {
         <h2 className="text-sm font-semibold text-slate-700">Filter applicants</h2>
 
         <div>
-          <label className="label">Stage</label>
+          <label className="label" htmlFor="ja-stage">Stage</label>
           <select
+            id="ja-stage"
             className="input"
             value={filters.stage}
             onChange={(e) => update("stage", e.target.value as ApplicationStage | "")}
@@ -183,8 +179,9 @@ export function HrJobApplicantsPage() {
           </select>
         </div>
         <div>
-          <label className="label">Search cover note / skills</label>
+          <label className="label" htmlFor="ja-q">Search cover note / skills</label>
           <input
+            id="ja-q"
             className="input"
             placeholder="keyword"
             value={filters.q}
@@ -192,40 +189,42 @@ export function HrJobApplicantsPage() {
           />
         </div>
         <div>
-          <label className="label">Skills (any of)</label>
-          <input
-            className="input"
-            placeholder="python, fastapi"
+          <label className="label" htmlFor="ja-skills-any">Skills (any of)</label>
+          <TagInput
+            id="ja-skills-any"
             value={filters.skills_any}
-            onChange={(e) => update("skills_any", e.target.value)}
+            onChange={(next) => update("skills_any", next)}
+            placeholder="python, fastapi"
+            ariaLabel="Match candidates with any of these skills"
           />
         </div>
         <div>
-          <label className="label">Skills (all of)</label>
-          <input
-            className="input"
-            placeholder="python, postgres"
+          <label className="label" htmlFor="ja-skills-all">Skills (all of)</label>
+          <TagInput
+            id="ja-skills-all"
             value={filters.skills_all}
-            onChange={(e) => update("skills_all", e.target.value)}
+            onChange={(next) => update("skills_all", next)}
+            placeholder="python, postgres"
+            ariaLabel="Match candidates with all of these skills"
           />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="label">Min exp</label>
-            <input className="input" type="number" min={0} value={filters.exp_min} onChange={(e) => update("exp_min", e.target.value)} />
+            <label className="label" htmlFor="ja-exp-min">Min exp</label>
+            <input id="ja-exp-min" className="input" type="number" min={0} value={filters.exp_min} onChange={(e) => update("exp_min", e.target.value)} />
           </div>
           <div>
-            <label className="label">Max exp</label>
-            <input className="input" type="number" min={0} value={filters.exp_max} onChange={(e) => update("exp_max", e.target.value)} />
+            <label className="label" htmlFor="ja-exp-max">Max exp</label>
+            <input id="ja-exp-max" className="input" type="number" min={0} value={filters.exp_max} onChange={(e) => update("exp_max", e.target.value)} />
           </div>
         </div>
         <div>
-          <label className="label">Max current CTC</label>
-          <input className="input" type="number" min={0} value={filters.current_ctc_max} onChange={(e) => update("current_ctc_max", e.target.value)} />
+          <label className="label" htmlFor="ja-current-ctc">Max current CTC</label>
+          <input id="ja-current-ctc" className="input" type="number" min={0} value={filters.current_ctc_max} onChange={(e) => update("current_ctc_max", e.target.value)} />
         </div>
         <div>
-          <label className="label">Max expected CTC</label>
-          <input className="input" type="number" min={0} value={filters.expected_ctc_max} onChange={(e) => update("expected_ctc_max", e.target.value)} />
+          <label className="label" htmlFor="ja-expected-ctc">Max expected CTC</label>
+          <input id="ja-expected-ctc" className="input" type="number" min={0} value={filters.expected_ctc_max} onChange={(e) => update("expected_ctc_max", e.target.value)} />
         </div>
         <div>
           <label className="label" htmlFor="notice-bucket">Notice period</label>
@@ -245,17 +244,17 @@ export function HrJobApplicantsPage() {
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="label">Applied after</label>
-            <input className="input" type="date" value={filters.applied_after} onChange={(e) => update("applied_after", e.target.value)} />
+            <label className="label" htmlFor="ja-applied-after">Applied after</label>
+            <input id="ja-applied-after" className="input" type="date" value={filters.applied_after} onChange={(e) => update("applied_after", e.target.value)} />
           </div>
           <div>
-            <label className="label">Applied before</label>
-            <input className="input" type="date" value={filters.applied_before} onChange={(e) => update("applied_before", e.target.value)} />
+            <label className="label" htmlFor="ja-applied-before">Applied before</label>
+            <input id="ja-applied-before" className="input" type="date" value={filters.applied_before} onChange={(e) => update("applied_before", e.target.value)} />
           </div>
         </div>
         <div>
-          <label className="label">Sort by</label>
-          <select className="input" value={filters.sort} onChange={(e) => update("sort", e.target.value as FilterForm["sort"])}>
+          <label className="label" htmlFor="ja-sort">Sort by</label>
+          <select id="ja-sort" className="input" value={filters.sort} onChange={(e) => update("sort", e.target.value as FilterForm["sort"])}>
             <option value="recent">Most recent</option>
             <option value="expected_ctc">Lowest expected CTC</option>
             <option value="notice">Shortest notice period</option>

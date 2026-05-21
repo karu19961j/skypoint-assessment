@@ -57,6 +57,8 @@ export interface JobListFilters {
   status?: JobStatus;
   mine?: boolean;
   sort?: "recent" | "salary_high" | "exp_low";
+  limit?: number;
+  offset?: number;
 }
 
 export const jobsApi = {
