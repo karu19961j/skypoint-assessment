@@ -4,9 +4,9 @@ from fastapi.testclient import TestClient
 
 from app.services.ranking import score_application_for_job, score_job_for_profile
 from app.tests.conftest import (
+    apply_with_profile,
     auth_headers,
     register_user,
-    sample_application_payload,
     sample_job_payload,
 )
 
@@ -140,32 +140,29 @@ def test_ranked_endpoint_returns_sorted_by_score(
 ) -> None:
     job_id = _create_job(client, hr_headers)
     # Strong candidate with both skills
-    client.post(
-        "/api/applications/",
-        json=sample_application_payload(
-            job_id,
-            skills=["python", "fastapi"],
-            years_experience=5,
-            expected_ctc=2_000_000,
-            notice_period_days=0,
-        ),
-        headers=candidate_headers,
+    apply_with_profile(
+        client,
+        candidate_headers,
+        job_id,
+        skills=["python", "fastapi"],
+        years_experience=5,
+        expected_ctc=2_000_000,
+        notice_period_days=0,
     )
 
     # Weaker candidate, different account
     other = register_user(
         client, email="weaker@example.com", password="Pass1234!", role="candidate", full_name="W"
     )
-    client.post(
-        "/api/applications/",
-        json=sample_application_payload(
-            job_id,
-            skills=["django"],
-            years_experience=0,
-            expected_ctc=4_000_000,
-            notice_period_days=90,
-        ),
-        headers=auth_headers(other),
+    apply_with_profile(
+        client,
+        auth_headers(other),
+        job_id,
+        skills=["django"],
+        years_experience=0,
+        is_fresher=True,
+        expected_ctc=4_000_000,
+        notice_period_days=90,
     )
 
     resp = client.get(
@@ -202,11 +199,7 @@ def test_csv_export_returns_anonymized_rows(
     client: TestClient, hr_headers: dict, candidate_headers: dict
 ) -> None:
     job_id = _create_job(client, hr_headers)
-    client.post(
-        "/api/applications/",
-        json=sample_application_payload(job_id),
-        headers=candidate_headers,
-    )
+    apply_with_profile(client, candidate_headers, job_id)
 
     resp = client.get(
         f"/api/applications/by-job/{job_id}/export", headers=hr_headers

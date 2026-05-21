@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.tests.conftest import (
-    sample_application_payload,
+    apply_with_profile,
     sample_job_payload,
 )
 
@@ -16,11 +16,7 @@ def test_dashboard_counts_reflect_state(
     client.patch(f"/api/jobs/{job_c['id']}/status", json={"status": "paused"}, headers=hr_headers)
 
     # One application on job A
-    client.post(
-        "/api/applications/",
-        json=sample_application_payload(job_a["id"]),
-        headers=candidate_headers,
-    )
+    apply_with_profile(client, candidate_headers, job_a["id"])
 
     dash = client.get("/api/dashboard/hr", headers=hr_headers)
     assert dash.status_code == 200

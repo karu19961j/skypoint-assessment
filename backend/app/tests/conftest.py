@@ -231,19 +231,82 @@ def in_memory_storage(monkeypatch: pytest.MonkeyPatch) -> InMemoryStorage:
 
 
 def sample_application_payload(job_id: int, **overrides) -> dict:
-    # Resume upload is exercised in its own test module against a mocked
-    # storage client. The application-create tests run with `resume_key=None`
-    # by default — apply-without-resume is a valid path so the legacy
-    # auth/role/duplicate-rejection tests don't need to spin up MinIO.
+    """Apply payload. All candidate data lives on the profile now — the
+    apply endpoint only takes job_id + optional cover_note. Tests that
+    exercise the apply path use `seed_candidate_profile` to populate the
+    candidate's profile + resume_key first."""
     payload = {
         "job_id": job_id,
-        "resume_key": None,
         "cover_note": "I would love to apply.",
-        "current_ctc": 1_500_000,
-        "expected_ctc": 2_500_000,
-        "notice_period_days": 30,
-        "years_experience": 4,
-        "skills": ["python", "fastapi"],
     }
     payload.update(overrides)
     return payload
+
+
+def apply_with_profile(
+    client: TestClient,
+    candidate_headers: dict[str, str],
+    job_id: int,
+    *,
+    skills: list[str] | None = None,
+    years_experience: int = 4,
+    current_ctc: int = 1_500_000,
+    expected_ctc: int = 2_500_000,
+    notice_period_days: int = 30,
+    is_fresher: bool = False,
+    cover_note: str = "I would love to apply.",
+    resume_key: str | None = None,
+):
+    """Convenience for tests that need a candidate to apply with a
+    specific profile shape. PUT-upserts the profile (idempotent), then
+    POSTs the application. Returns the application's response."""
+    seed_candidate_profile(
+        client,
+        candidate_headers,
+        resume_key=resume_key,
+        skills=skills,
+        years_experience=years_experience,
+        current_ctc=current_ctc,
+        expected_ctc=expected_ctc,
+        notice_period_days=notice_period_days,
+        is_fresher=is_fresher,
+    )
+    return client.post(
+        "/api/applications/",
+        json={"job_id": job_id, "cover_note": cover_note},
+        headers=candidate_headers,
+    )
+
+
+def seed_candidate_profile(
+    client: TestClient,
+    candidate_headers: dict[str, str],
+    *,
+    resume_key: str | None = None,
+    skills: list[str] | None = None,
+    years_experience: int = 4,
+    current_ctc: int = 1_500_000,
+    expected_ctc: int = 2_500_000,
+    notice_period_days: int = 30,
+    is_fresher: bool = False,
+    experiences: list[dict] | None = None,
+    educations: list[dict] | None = None,
+) -> dict:
+    """Populate a candidate's profile via the public API. Use before any
+    test that hits POST /api/applications — the apply endpoint now
+    requires a profile with a resume on file."""
+    payload = {
+        "skills": skills or ["python", "fastapi"],
+        "is_fresher": is_fresher,
+        "years_experience": 0 if is_fresher else years_experience,
+        "current_ctc": 0 if is_fresher else current_ctc,
+        "expected_ctc": expected_ctc,
+        "notice_period_days": notice_period_days,
+        "preferred_locations": ["remote"],
+        "experiences": experiences or [],
+        "educations": educations or [],
+        "resume_key": resume_key,
+    }
+    resp = client.put("/api/profile/", headers=candidate_headers, json=payload)
+    assert resp.status_code == 200, resp.text
+    return resp.json()

@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.tests.conftest import (
@@ -5,7 +6,26 @@ from app.tests.conftest import (
     register_user,
     sample_application_payload,
     sample_job_payload,
+    seed_candidate_profile,
 )
+
+
+@pytest.fixture(autouse=True)
+def _candidate_ready_to_apply(client, candidate_headers, in_memory_storage):
+    """Apply now requires a profile + resume on file. This autouse
+    fixture provisions both for the candidate so the existing test bodies
+    can keep calling POST /api/applications without extra ceremony.
+    HR-only tests (test_hr_cannot_apply) still get 403 because the role
+    check fires before the profile check."""
+    upload = client.post(
+        "/api/resume/upload",
+        headers=candidate_headers,
+        files={"file": ("cv.pdf", b"%PDF-1.4\ntest content", "application/pdf")},
+    )
+    assert upload.status_code == 201, upload.text
+    seed_candidate_profile(
+        client, candidate_headers, resume_key=upload.json()["resume_key"]
+    )
 
 
 def _create_job(client: TestClient, hr_headers: dict) -> int:
