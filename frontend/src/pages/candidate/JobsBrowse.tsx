@@ -58,8 +58,9 @@ function buildQuery(f: Filters, offset: number): JobListFilters {
   if (f.department.trim()) q.department = f.department.trim();
   if (f.exp_min) q.exp_min = Number(f.exp_min);
   if (f.exp_max) q.exp_max = Number(f.exp_max);
-  if (f.ctc_min) q.ctc_min = Number(f.ctc_min);
-  if (f.ctc_max) q.ctc_max = Number(f.ctc_max);
+  // CTC inputs are in LPA (lakhs) — convert to raw rupees for the API.
+  if (f.ctc_min) q.ctc_min = Math.round(Number(f.ctc_min) * 100_000);
+  if (f.ctc_max) q.ctc_max = Math.round(Number(f.ctc_max) * 100_000);
   if (f.skills.length) q.skills = f.skills;
   return q;
 }
@@ -76,7 +77,7 @@ export function CandidateJobsPage() {
   // Debounce filters before they hit the query layer. The sidebar
   // inputs stay snappy; the API call (and infinite-scroll cache key)
   // lag by 300ms so typing 'react developer' doesn't fire 15 fetches.
-  const debouncedFilters = useDebouncedValue(filters, 300);
+  const debouncedFilters = useDebouncedValue(filters, 400);
 
   // ----- All-jobs tab uses infinite scroll -----
   // React Query's useInfiniteQuery is the canonical idiom: pageParams are
@@ -268,23 +269,27 @@ export function CandidateJobsPage() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="label" htmlFor="browse-ctc-min">Min CTC</label>
+            <label className="label" htmlFor="browse-ctc-min">Min CTC (LPA)</label>
             <input
               id="browse-ctc-min"
               className="input"
               type="number"
               min={0}
+              step="0.5"
+              placeholder="e.g. 12"
               value={filters.ctc_min}
               onChange={(e) => update("ctc_min", e.target.value)}
             />
           </div>
           <div>
-            <label className="label" htmlFor="browse-ctc-max">Max CTC</label>
+            <label className="label" htmlFor="browse-ctc-max">Max CTC (LPA)</label>
             <input
               id="browse-ctc-max"
               className="input"
               type="number"
               min={0}
+              step="0.5"
+              placeholder="e.g. 25"
               value={filters.ctc_max}
               onChange={(e) => update("ctc_max", e.target.value)}
             />

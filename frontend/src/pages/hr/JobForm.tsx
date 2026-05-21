@@ -9,8 +9,11 @@ import { jobsApi } from "@/api/endpoints";
 import { queryKeys } from "@/api/queryKeys";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { TagInput } from "@/components/TagInput";
+import { lpaToRupees, rupeesToLpa } from "@/lib/format";
 import { notify, notifyError } from "@/lib/toast";
 
+// CTC inputs accept LPA (12, 21, 18.5 etc.) — converted to raw rupees
+// at the API boundary. 500 LPA cap is generous-but-sane for top-tier comp.
 const schema = z
   .object({
     title: z.string().min(1, "Required").max(200),
@@ -20,17 +23,17 @@ const schema = z
     employment_type: z.enum(["full_time", "part_time", "contract", "internship"]),
     exp_min: z.coerce.number().int().min(0).max(60),
     exp_max: z.coerce.number().int().min(0).max(60),
-    ctc_min: z.coerce.number().int().min(0),
-    ctc_max: z.coerce.number().int().min(0),
+    ctc_min_lpa: z.coerce.number().min(0).max(500),
+    ctc_max_lpa: z.coerce.number().min(0).max(500),
     deadline: z.string().optional(),
   })
   .refine((d) => d.exp_max >= d.exp_min, {
     message: "Max exp must be ≥ min exp",
     path: ["exp_max"],
   })
-  .refine((d) => d.ctc_max >= d.ctc_min, {
+  .refine((d) => d.ctc_max_lpa >= d.ctc_min_lpa, {
     message: "Max CTC must be ≥ min CTC",
-    path: ["ctc_max"],
+    path: ["ctc_max_lpa"],
   });
 
 type FormValues = z.infer<typeof schema>;
@@ -57,8 +60,8 @@ export function HrJobFormPage() {
       employment_type: "full_time",
       exp_min: 0,
       exp_max: 0,
-      ctc_min: 0,
-      ctc_max: 0,
+      ctc_min_lpa: 0,
+      ctc_max_lpa: 0,
       deadline: "",
     },
   });
@@ -80,8 +83,9 @@ export function HrJobFormPage() {
       employment_type: j.employment_type,
       exp_min: j.exp_min,
       exp_max: j.exp_max,
-      ctc_min: j.ctc_min,
-      ctc_max: j.ctc_max,
+      // Backend stores raw rupees; form thinks in LPA.
+      ctc_min_lpa: rupeesToLpa(j.ctc_min),
+      ctc_max_lpa: rupeesToLpa(j.ctc_max),
       deadline: j.deadline ?? "",
     });
     setSkills(j.skills);
@@ -97,8 +101,8 @@ export function HrJobFormPage() {
         employment_type: values.employment_type,
         exp_min: values.exp_min,
         exp_max: values.exp_max,
-        ctc_min: values.ctc_min,
-        ctc_max: values.ctc_max,
+        ctc_min: lpaToRupees(values.ctc_min_lpa),
+        ctc_max: lpaToRupees(values.ctc_max_lpa),
         skills,
         deadline: values.deadline ? values.deadline : null,
       };
@@ -248,14 +252,23 @@ export function HrJobFormPage() {
           </div>
           <div>
             <label className="label" htmlFor="job-ctc-min">
-              Min CTC (₹) <span aria-hidden="true" className="text-rose-600">*</span>
+              Min CTC (LPA) <span aria-hidden="true" className="text-rose-600">*</span>
               <span className="sr-only"> (required)</span>
             </label>
-            <input id="job-ctc-min" className="input" type="number" min={0} aria-required="true" {...register("ctc_min")} />
+            <input
+              id="job-ctc-min"
+              className="input"
+              type="number"
+              min={0}
+              step="0.5"
+              placeholder="e.g. 12"
+              aria-required="true"
+              {...register("ctc_min_lpa")}
+            />
           </div>
           <div>
             <label className="label" htmlFor="job-ctc-max">
-              Max CTC (₹) <span aria-hidden="true" className="text-rose-600">*</span>
+              Max CTC (LPA) <span aria-hidden="true" className="text-rose-600">*</span>
               <span className="sr-only"> (required)</span>
             </label>
             <input
@@ -263,14 +276,16 @@ export function HrJobFormPage() {
               className="input"
               type="number"
               min={0}
+              step="0.5"
+              placeholder="e.g. 25"
               aria-required="true"
-              aria-invalid={errors.ctc_max ? "true" : undefined}
-              aria-describedby={errors.ctc_max ? "job-ctc-max-error" : undefined}
-              {...register("ctc_max")}
+              aria-invalid={errors.ctc_max_lpa ? "true" : undefined}
+              aria-describedby={errors.ctc_max_lpa ? "job-ctc-max-error" : undefined}
+              {...register("ctc_max_lpa")}
             />
-            {errors.ctc_max && (
+            {errors.ctc_max_lpa && (
               <p id="job-ctc-max-error" role="alert" className="mt-1 text-xs text-rose-600">
-                {errors.ctc_max.message}
+                {errors.ctc_max_lpa.message}
               </p>
             )}
           </div>

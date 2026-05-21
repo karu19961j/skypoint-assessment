@@ -16,13 +16,17 @@ import type {
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { ResumeUpload } from "@/components/ResumeUpload";
 import { TagInput } from "@/components/TagInput";
+import { lpaToRupees, rupeesToLpa } from "@/lib/format";
 import { notify, notifyError } from "@/lib/toast";
 
+// CTC fields are in LPA on the form (small, human-readable). Lower bound
+// of 0 covers "fresher / unwilling to disclose"; 500 LPA is way above
+// realistic top-tier comp and just prevents fat-finger garbage.
 const schema = z.object({
   is_fresher: z.boolean(),
   years_experience: z.coerce.number().int().min(0).max(60),
-  current_ctc: z.coerce.number().int().min(0),
-  expected_ctc: z.coerce.number().int().min(0),
+  current_ctc_lpa: z.coerce.number().min(0).max(500),
+  expected_ctc_lpa: z.coerce.number().min(0).max(500),
   notice_period_days: z.coerce.number().int().min(0).max(365),
 });
 
@@ -73,8 +77,8 @@ export function CandidateProfilePage() {
     defaultValues: {
       is_fresher: false,
       years_experience: 0,
-      current_ctc: 0,
-      expected_ctc: 0,
+      current_ctc_lpa: 0,
+      expected_ctc_lpa: 0,
       notice_period_days: 30,
     },
   });
@@ -100,8 +104,9 @@ export function CandidateProfilePage() {
     reset({
       is_fresher: p.is_fresher,
       years_experience: p.years_experience,
-      current_ctc: p.current_ctc,
-      expected_ctc: p.expected_ctc,
+      // Backend stores raw rupees; the form thinks in LPA.
+      current_ctc_lpa: rupeesToLpa(p.current_ctc),
+      expected_ctc_lpa: rupeesToLpa(p.expected_ctc),
       notice_period_days: p.notice_period_days,
     });
   }, [profileQuery.data, reset]);
@@ -112,7 +117,7 @@ export function CandidateProfilePage() {
   useEffect(() => {
     if (isFresher) {
       setValue("years_experience", 0);
-      setValue("current_ctc", 0);
+      setValue("current_ctc_lpa", 0);
       setExperiences([]);
     }
   }, [isFresher, setValue]);
@@ -126,8 +131,9 @@ export function CandidateProfilePage() {
         skills,
         is_fresher: values.is_fresher,
         years_experience: values.years_experience,
-        current_ctc: values.current_ctc,
-        expected_ctc: values.expected_ctc,
+        // LPA → raw rupees at the API boundary.
+        current_ctc: lpaToRupees(values.current_ctc_lpa),
+        expected_ctc: lpaToRupees(values.expected_ctc_lpa),
         notice_period_days: values.notice_period_days,
         preferred_locations: locations,
         experiences: experiences.map(stripExperienceId),
@@ -157,8 +163,8 @@ export function CandidateProfilePage() {
       reset({
         is_fresher: false,
         years_experience: 0,
-        current_ctc: 0,
-        expected_ctc: 0,
+        current_ctc_lpa: 0,
+        expected_ctc_lpa: 0,
         notice_period_days: 30,
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.profile.me() });
@@ -293,20 +299,22 @@ export function CandidateProfilePage() {
           </div>
           <div>
             <label className="label" htmlFor="profile-current-ctc">
-              Current CTC (₹/year)
+              Current CTC (LPA)
             </label>
             <input
               id="profile-current-ctc"
               className="input"
               type="number"
               min={0}
+              step="0.5"
+              placeholder="e.g. 18"
               disabled={isFresher}
-              {...register("current_ctc")}
+              {...register("current_ctc_lpa")}
             />
           </div>
           <div>
             <label className="label" htmlFor="profile-expected-ctc">
-              Expected CTC (₹/year) <span aria-hidden="true" className="text-rose-600">*</span>
+              Expected CTC (LPA) <span aria-hidden="true" className="text-rose-600">*</span>
               <span className="sr-only"> (required)</span>
             </label>
             <input
@@ -314,8 +322,10 @@ export function CandidateProfilePage() {
               className="input"
               type="number"
               min={0}
+              step="0.5"
+              placeholder="e.g. 25"
               aria-required="true"
-              {...register("expected_ctc")}
+              {...register("expected_ctc_lpa")}
             />
           </div>
         </section>

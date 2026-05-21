@@ -1,6 +1,28 @@
 import type { ApplicationStage, EmploymentType, LocationType } from "@/api/types";
 
+// One lakh = 100,000 rupees. The backend stores CTC in raw rupees; the
+// UI accepts and shows LPA (lakhs per annum) because that's what every
+// Indian recruiter / candidate actually thinks in. Convert at the form
+// boundary, not in the API layer.
 const LAKH = 100_000;
+
+export const LPA = LAKH;
+
+/** Convert lakhs (e.g. 12) to raw rupees (1_200_000). Rounded so 12.5 LPA
+ *  doesn't accidentally persist as 1_250_000.0001 through floats. */
+export function lpaToRupees(lpa: number | string | undefined | null): number {
+  if (lpa === null || lpa === undefined || lpa === "") return 0;
+  const n = typeof lpa === "string" ? Number(lpa) : lpa;
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * LAKH);
+}
+
+/** Convert raw rupees to lakhs. Used when hydrating a profile/job edit
+ *  form from the backend's raw-rupees value. */
+export function rupeesToLpa(rupees: number | null | undefined): number {
+  if (!rupees) return 0;
+  return rupees / LAKH;
+}
 
 export function formatCtc(amount: number): string {
   if (amount <= 0) return "—";

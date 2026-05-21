@@ -3,6 +3,7 @@ import type {
   CrossJobApplicantFilters,
 } from "@/api/endpoints";
 import type { ApplicationStage } from "@/api/types";
+import { lpaToRupees } from "@/lib/format";
 
 /**
  * Shared filter shape used by both `/hr/jobs/:id/applicants` and
@@ -54,8 +55,9 @@ export function applicantFiltersToApi(f: ApplicantFilterForm): ApplicantFilters 
   if (f.skills_all.length) out.skills_all = f.skills_all;
   if (f.exp_min) out.exp_min = Number(f.exp_min);
   if (f.exp_max) out.exp_max = Number(f.exp_max);
-  if (f.current_ctc_max) out.current_ctc_max = Number(f.current_ctc_max);
-  if (f.expected_ctc_max) out.expected_ctc_max = Number(f.expected_ctc_max);
+  // Form holds LPA (the unit HR types in); the API still speaks rupees.
+  if (f.current_ctc_max) out.current_ctc_max = lpaToRupees(f.current_ctc_max);
+  if (f.expected_ctc_max) out.expected_ctc_max = lpaToRupees(f.expected_ctc_max);
   if (f.notice_max_days) out.notice_max_days = Number(f.notice_max_days);
   if (f.applied_after) out.applied_after = f.applied_after;
   if (f.applied_before) out.applied_before = f.applied_before;

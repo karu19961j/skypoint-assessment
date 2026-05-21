@@ -114,24 +114,28 @@ export function ApplicantFilterSidebar({
       </div>
 
       <div>
-        <label className="label" htmlFor={`${idPrefix}-current-ctc`}>Max current CTC</label>
+        <label className="label" htmlFor={`${idPrefix}-current-ctc`}>Max current CTC (LPA)</label>
         <input
           id={`${idPrefix}-current-ctc`}
           className="input"
           type="number"
           min={0}
+          step="0.5"
+          placeholder="e.g. 12"
           value={value.current_ctc_max}
           onChange={(e) => update("current_ctc_max", e.target.value)}
         />
       </div>
 
       <div>
-        <label className="label" htmlFor={`${idPrefix}-expected-ctc`}>Max expected CTC</label>
+        <label className="label" htmlFor={`${idPrefix}-expected-ctc`}>Max expected CTC (LPA)</label>
         <input
           id={`${idPrefix}-expected-ctc`}
           className="input"
           type="number"
           min={0}
+          step="0.5"
+          placeholder="e.g. 25"
           value={value.expected_ctc_max}
           onChange={(e) => update("expected_ctc_max", e.target.value)}
         />
