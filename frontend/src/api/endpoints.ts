@@ -1,4 +1,4 @@
-import { apiFetch, apiUpload } from "./client";
+import { apiFetch, apiFetchWithCount, apiUpload } from "./client";
 import type {
   Application,
   ApplicationCreate,
@@ -66,6 +66,12 @@ export const jobsApi = {
   list(filters: JobListFilters = {}) {
     return apiFetch<Job[]>("/jobs/", { query: filters as Record<string, unknown> });
   },
+  /** Like `list`, but returns the X-Total-Count for the pagination footer. */
+  listWithCount(filters: JobListFilters = {}) {
+    return apiFetchWithCount<Job[]>("/jobs/", {
+      query: filters as Record<string, unknown>,
+    });
+  },
   get(id: number) {
     return apiFetch<Job>(`/jobs/${id}`);
   },
@@ -111,6 +117,16 @@ export interface CrossJobApplicantFilters extends ApplicantFilters {
   job_id?: number;
 }
 
+export interface PaginatedApplicantFilters extends ApplicantFilters {
+  limit?: number;
+  offset?: number;
+}
+
+export interface PaginatedCrossJobFilters extends CrossJobApplicantFilters {
+  limit?: number;
+  offset?: number;
+}
+
 export const applicationsApi = {
   apply(payload: ApplicationCreate) {
     return apiFetch<Application>("/applications/", { method: "POST", body: payload });
@@ -132,8 +148,18 @@ export const applicationsApi = {
       query: filters as Record<string, unknown>,
     });
   },
+  byJobWithCount(jobId: number, filters: PaginatedApplicantFilters = {}) {
+    return apiFetchWithCount<Application[]>(`/applications/by-job/${jobId}`, {
+      query: filters as Record<string, unknown>,
+    });
+  },
   all(filters: CrossJobApplicantFilters = {}) {
     return apiFetch<Application[]>("/applications/all", {
+      query: filters as Record<string, unknown>,
+    });
+  },
+  allWithCount(filters: PaginatedCrossJobFilters = {}) {
+    return apiFetchWithCount<Application[]>("/applications/all", {
       query: filters as Record<string, unknown>,
     });
   },

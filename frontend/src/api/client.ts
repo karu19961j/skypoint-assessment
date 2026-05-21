@@ -147,6 +147,54 @@ export async function apiUpload<T>(
 }
 
 
+/**
+ * Authenticated GET that returns the parsed body alongside the
+ * `X-Total-Count` header (for paginated endpoints). Same auth + error
+ * handling as `apiFetch`; just one extra read of the response header.
+ *
+ * Returns `{ items, total }`. `total` is null when the server doesn't
+ * include the header — caller falls back gracefully.
+ */
+export async function apiFetchWithCount<T>(
+  path: string,
+  opts: { query?: Record<string, unknown>; signal?: AbortSignal } = {},
+): Promise<{ items: T; total: number | null }> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const url = `/api${path}${buildQuery(opts.query)}`;
+  let resp: Response;
+  try {
+    resp = await fetch(url, { method: "GET", headers, signal: opts.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new ApiError(0, "Couldn't reach the server. Check your connection and try again.");
+  }
+
+  const contentType = resp.headers.get("content-type") ?? "";
+  const payload = contentType.includes("application/json")
+    ? await resp.json()
+    : await resp.text();
+
+  if (!resp.ok) {
+    const detail =
+      typeof payload === "object" && payload !== null && "detail" in payload
+        ? String((payload as { detail: unknown }).detail)
+        : String(payload);
+    if (resp.status === 401 && token !== null && onUnauthorized) {
+      setToken(null);
+      onUnauthorized();
+    }
+    throw new ApiError(resp.status, detail);
+  }
+
+  const totalHeader = resp.headers.get("X-Total-Count");
+  const total = totalHeader === null ? null : Number(totalHeader);
+  return { items: payload as T, total: Number.isFinite(total) ? total : null };
+}
+
+
 export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const token = getToken();

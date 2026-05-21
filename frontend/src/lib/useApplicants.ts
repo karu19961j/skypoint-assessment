@@ -12,16 +12,17 @@ import type {
 import { notifyError } from "@/lib/toast";
 
 interface UseApplicantsOpts {
-  /** Query key for cache + invalidation. Pass the same key the parent page
-   *  uses with React Query's `queryKey` convention; on stage updates this
-   *  hook calls `invalidateQueries` with this exact key. */
+  /** Query key for cache + invalidation. */
   queryKey: readonly unknown[];
-  /** Fetches the current page of applicants. Set to null to pause. */
-  fetcher: (() => Promise<Application[]>) | null;
+  /** Fetches one page of applicants. Returns `{ items, total }` so the
+   *  pagination footer can render "Showing X–Y of Z". Endpoints that
+   *  don't paginate (e.g. ranked mode) pass `items.length` as `total`. */
+  fetcher: (() => Promise<{ items: Application[]; total: number }>) | null;
 }
 
 interface UseApplicantsResult {
   applicants: Application[];
+  total: number;
   scoreByAppId: Map<number, ScoreBreakdown>;
   error: string | null;
   loading: boolean;
@@ -30,20 +31,14 @@ interface UseApplicantsResult {
 }
 
 /**
- * Shared state + behaviour for the two HR applicants pages.
+ * Shared state for the two HR applicants pages.
  *
- * Container/Presenter split: this hook owns React Query for fetch + stage
- * mutation; the pages render the UI.
+ * Container/Presenter split: the hook owns React Query for fetch +
+ * stage mutation; the pages render the UI.
  *
- * Under the hood:
- *   - useQuery with the caller's queryKey caches the response per filter
- *     set, so back-nav between jobs is instant.
- *   - setStage runs through useMutation with onError → toast and on success
- *     invalidates the SAME queryKey so the row reshapes to its new
- *     allowed_next_stages without a full reload.
- *   - The component still tracks its own ad-hoc `error` string for cases
- *     where the parent wants to surface a non-network failure (e.g. CSV
- *     export rejection). Mutation/network errors land in toasts.
+ * Pagination model: the fetcher returns the page's items plus the total
+ * count, so the parent can render a `<Pagination>` footer + reset to
+ * page 1 when filters change.
  */
 export function useApplicants({
   queryKey,
@@ -58,7 +53,8 @@ export function useApplicants({
     enabled: fetcher !== null,
   });
 
-  const applicants = query.data ?? [];
+  const applicants = query.data?.items ?? [];
+  const total = query.data?.total ?? 0;
   const scoreByAppId = new Map<number, ScoreBreakdown>();
   for (const row of applicants) {
     if ("score" in row) {
@@ -70,8 +66,6 @@ export function useApplicants({
     mutationFn: ({ id, stage }: { id: number; stage: ApplicationStage }) =>
       applicationsApi.setStage(id, stage),
     onSuccess: () => {
-      // Invalidate the parent's query + every nested applications cache
-      // so timelines, drawers, and the cross-job feed pick up the change.
       queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: queryKeys.applications.all() });
     },
@@ -82,6 +76,7 @@ export function useApplicants({
 
   return {
     applicants,
+    total,
     scoreByAppId,
     error: error ?? queryError,
     loading: query.isLoading,
