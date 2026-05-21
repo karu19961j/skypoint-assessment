@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, apiUpload } from "./client";
 import type {
   Application,
   ApplicationCreate,
@@ -15,6 +15,7 @@ import type {
   ProfileUpsert,
   RankedApplication,
   RecommendedJob,
+  ResumeUploadResponse,
   TokenResponse,
   User,
 } from "./types";
@@ -191,3 +192,30 @@ export const dashboardApi = {
     return apiFetch<DashboardData>("/dashboard/hr");
   },
 };
+
+export const resumeApi = {
+  /**
+   * Upload a resume file. Returns the storage key the apply form embeds
+   * in the application POST, plus autofill suggestions derived from the
+   * resume text (skills cross-matched against the job's required skills,
+   * plus a best-effort YOE guess).
+   */
+  upload(file: File, jobId?: number) {
+    const fd = new FormData();
+    fd.append("file", file);
+    return apiUpload<ResumeUploadResponse>(
+      "/resume/upload",
+      fd,
+      jobId !== undefined ? { query: { job_id: jobId } } : {},
+    );
+  },
+  /** Build the absolute path the download anchor / fetch hits. */
+  downloadPath(applicationId: number): string {
+    return `/resume/${applicationId}/download`;
+  },
+};
+
+/** Max upload size in bytes — mirrors RESUME_MAX_BYTES on the backend so
+ *  the client can short-circuit oversize files before sending. */
+export const RESUME_MAX_BYTES = 15 * 1024 * 1024;
+export const RESUME_ACCEPT = ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";

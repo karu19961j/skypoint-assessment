@@ -94,6 +94,59 @@ export async function downloadFile(
 }
 
 
+/**
+ * Authenticated multipart/form-data upload. Browser-set Content-Type
+ * (with the boundary) is preserved by NOT including it in headers — let
+ * `fetch` infer it from the FormData body.
+ *
+ * Errors are surfaced as the same `ApiError` JSON callers see, so the
+ * upload UI uses the same handling path as every other endpoint.
+ */
+export async function apiUpload<T>(
+  path: string,
+  formData: FormData,
+  opts: { query?: Record<string, unknown>; signal?: AbortSignal } = {},
+): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const url = `/api${path}${buildQuery(opts.query)}`;
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: "POST",
+      headers,
+      body: formData,
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw err;
+    }
+    throw new ApiError(0, "Couldn't reach the server. Check your connection and try again.");
+  }
+
+  const contentType = resp.headers.get("content-type") ?? "";
+  const payload = contentType.includes("application/json")
+    ? await resp.json()
+    : await resp.text();
+
+  if (!resp.ok) {
+    const detail =
+      typeof payload === "object" && payload !== null && "detail" in payload
+        ? String((payload as { detail: unknown }).detail)
+        : String(payload);
+    if (resp.status === 401 && token !== null && onUnauthorized) {
+      setToken(null);
+      onUnauthorized();
+    }
+    throw new ApiError(resp.status, detail);
+  }
+  return payload as T;
+}
+
+
 export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const token = getToken();
@@ -106,12 +159,23 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
   }
 
   const url = `/api${path}${buildQuery(opts.query)}`;
-  const resp = await fetch(url, {
-    method: opts.method ?? "GET",
-    headers,
-    body,
-    signal: opts.signal,
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: opts.method ?? "GET",
+      headers,
+      body,
+      signal: opts.signal,
+    });
+  } catch (err) {
+    // `fetch` rejects with TypeError on network failures (DNS error,
+    // backend down, offline). Surface a friendly ApiError so the UI's
+    // existing `err instanceof ApiError` branch renders it cleanly.
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw err; // cancelled by the caller; re-throw verbatim
+    }
+    throw new ApiError(0, "Couldn't reach the server. Check your connection and try again.");
+  }
 
   if (resp.status === 204) {
     return undefined as T;

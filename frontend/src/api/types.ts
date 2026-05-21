@@ -72,11 +72,19 @@ export interface CandidateMini {
   email: string;
 }
 
+export interface ResumeMeta {
+  filename: string | null;
+  size_bytes: number | null;
+  content_type: string | null;
+}
+
 export interface Application {
   id: number;
   job_id: number;
   candidate_id: number;
-  resume_link: string;
+  /** Resume metadata. `null` on anonymized list responses; populated on
+   *  the identity-bearing detail endpoint (Profile drawer). */
+  resume: ResumeMeta | null;
   cover_note: string;
   current_ctc: number;
   expected_ctc: number;
@@ -95,13 +103,28 @@ export interface Application {
 
 export interface ApplicationCreate {
   job_id: number;
-  resume_link: string;
+  /** Set after a successful POST /api/resume/upload. Optional — a
+   *  candidate may apply without a resume. */
+  resume_key: string | null;
   cover_note: string;
   current_ctc: number;
   expected_ctc: number;
   notice_period_days: number;
   years_experience: number;
   skills: string[];
+}
+
+export interface ResumeAutofill {
+  skills: string[];
+  years_experience: number | null;
+}
+
+export interface ResumeUploadResponse {
+  resume_key: string;
+  filename: string;
+  size_bytes: number;
+  content_type: string;
+  autofill: ResumeAutofill;
 }
 
 export interface ApplicationNote {
