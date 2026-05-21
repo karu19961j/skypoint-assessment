@@ -59,6 +59,41 @@ function buildQuery(params: Record<string, unknown> | undefined): string {
   return str ? `?${str}` : "";
 }
 
+/**
+ * Authenticated blob download for endpoints that stream a file (currently
+ * just the applicants CSV export). Builds the query string itself, sets
+ * the bearer header, parses Content-Disposition for the suggested
+ * filename, and triggers a hidden anchor click to save the file.
+ */
+export async function downloadFile(
+  path: string,
+  query?: Record<string, unknown>,
+  fallbackFilename = "download",
+): Promise<void> {
+  const url = `/api${path}${buildQuery(query)}`;
+  const token = getToken();
+  const resp = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  const blob = await resp.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const filenameMatch = resp.headers
+    .get("Content-Disposition")
+    ?.match(/filename="?([^"]+)"?/);
+  const filename = filenameMatch?.[1] ?? fallbackFilename;
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(objectUrl);
+}
+
+
 export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const token = getToken();

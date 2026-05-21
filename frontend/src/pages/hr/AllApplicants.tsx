@@ -1,64 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
-import { applicationsApi, jobsApi, type CrossJobApplicantFilters } from "@/api/endpoints";
+import { applicationsApi, jobsApi } from "@/api/endpoints";
 import type { Application, ApplicationStage, Job } from "@/api/types";
 import { APPLICATION_STAGES } from "@/api/types";
+import { ApplicantFilterSidebar } from "@/components/applicants/FilterSidebar";
+import { ApplicantsTable } from "@/components/applicants/ApplicantsTable";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { NotesDrawer } from "@/components/NotesDrawer";
-import { StageBadge } from "@/components/StageBadge";
-import { TagInput } from "@/components/TagInput";
-import { formatCtc, formatRelative, stageLabel } from "@/lib/format";
+import { stageLabel } from "@/lib/format";
+import {
+  crossJobFiltersToApi,
+  EMPTY_APPLICANT_FILTERS,
+  type ApplicantFilterForm,
+} from "@/lib/applicantFilters";
 
-interface FilterForm {
+interface FilterForm extends ApplicantFilterForm {
   job_id: string;
-  stage: ApplicationStage | "";
-  skills_any: string[];
-  skills_all: string[];
-  exp_min: string;
-  exp_max: string;
-  current_ctc_max: string;
-  expected_ctc_max: string;
-  notice_max_days: string;
-  applied_after: string;
-  applied_before: string;
-  q: string;
-  sort: "recent" | "expected_ctc" | "notice" | "experience";
 }
 
-const EMPTY: FilterForm = {
-  job_id: "",
-  stage: "",
-  skills_any: [],
-  skills_all: [],
-  exp_min: "",
-  exp_max: "",
-  current_ctc_max: "",
-  expected_ctc_max: "",
-  notice_max_days: "",
-  applied_after: "",
-  applied_before: "",
-  q: "",
-  sort: "recent",
-};
-
-function toApi(f: FilterForm): CrossJobApplicantFilters {
-  const out: CrossJobApplicantFilters = { sort: f.sort };
-  if (f.job_id) out.job_id = Number(f.job_id);
-  if (f.stage) out.stage = f.stage;
-  if (f.skills_any.length) out.skills_any = f.skills_any;
-  if (f.skills_all.length) out.skills_all = f.skills_all;
-  if (f.exp_min) out.exp_min = Number(f.exp_min);
-  if (f.exp_max) out.exp_max = Number(f.exp_max);
-  if (f.current_ctc_max) out.current_ctc_max = Number(f.current_ctc_max);
-  if (f.expected_ctc_max) out.expected_ctc_max = Number(f.expected_ctc_max);
-  if (f.notice_max_days) out.notice_max_days = Number(f.notice_max_days);
-  if (f.applied_after) out.applied_after = f.applied_after;
-  if (f.applied_before) out.applied_before = f.applied_before;
-  if (f.q.trim()) out.q = f.q.trim();
-  return out;
-}
+const EMPTY: FilterForm = { ...EMPTY_APPLICANT_FILTERS, job_id: "" };
 
 export function HrAllApplicantsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -66,7 +27,7 @@ export function HrAllApplicantsPage() {
   const [applicants, setApplicants] = useState<Application[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notesFor, setNotesFor] = useState<Application | null>(null);
-  const apiFilters = useMemo(() => toApi(filters), [filters]);
+  const apiFilters = useMemo(() => crossJobFiltersToApi(filters), [filters]);
 
   useEffect(() => {
     jobsApi
@@ -95,14 +56,13 @@ export function HrAllApplicantsPage() {
   const setStage = async (appId: number, stage: ApplicationStage) => {
     try {
       const updated = await applicationsApi.setStage(appId, stage);
-      setApplicants((prev) => prev.map((a) => (a.id === appId ? { ...a, ...updated } : a)));
+      setApplicants((prev) =>
+        prev.map((a) => (a.id === appId ? { ...a, ...updated } : a)),
+      );
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Could not update stage");
     }
   };
-
-  const update = <K extends keyof FilterForm>(key: K, value: FilterForm[K]) =>
-    setFilters((f) => ({ ...f, [key]: value }));
 
   const totals = useMemo(() => {
     const byStage: Record<ApplicationStage, number> = {
@@ -119,18 +79,22 @@ export function HrAllApplicantsPage() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
-      <aside className="card h-fit space-y-3 lg:sticky lg:top-4">
-        <h2 className="text-sm font-semibold text-slate-700">Filter applicants</h2>
-
+      <ApplicantFilterSidebar
+        idPrefix="all"
+        value={filters}
+        onChange={(next) => setFilters({ ...next, job_id: filters.job_id })}
+        onReset={() => setFilters(EMPTY)}
+      >
+        {/* Cross-job feed adds a Job dropdown above the shared filters. */}
         <div>
-          <label className="label" htmlFor="filter-job">
-            Job
-          </label>
+          <label className="label" htmlFor="all-filter-job">Job</label>
           <select
-            id="filter-job"
+            id="all-filter-job"
             className="input"
             value={filters.job_id}
-            onChange={(e) => update("job_id", e.target.value)}
+            onChange={(e) =>
+              setFilters((f) => ({ ...f, job_id: e.target.value }))
+            }
           >
             <option value="">All my jobs</option>
             {jobs.map((j) => (
@@ -140,155 +104,7 @@ export function HrAllApplicantsPage() {
             ))}
           </select>
         </div>
-
-        <div>
-          <label className="label">Stage</label>
-          <select
-            className="input"
-            value={filters.stage}
-            onChange={(e) => update("stage", e.target.value as ApplicationStage | "")}
-          >
-            <option value="">All stages</option>
-            {APPLICATION_STAGES.map((s) => (
-              <option key={s} value={s}>
-                {stageLabel(s)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="label" htmlFor="all-q">Search cover note / skills</label>
-          <input
-            id="all-q"
-            className="input"
-            placeholder="keyword"
-            value={filters.q}
-            onChange={(e) => update("q", e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="all-skills-any">Skills (any of)</label>
-          <TagInput
-            id="all-skills-any"
-            value={filters.skills_any}
-            onChange={(next) => update("skills_any", next)}
-            placeholder="python, fastapi"
-            ariaLabel="Match candidates with any of these skills"
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="all-skills-all">Skills (all of)</label>
-          <TagInput
-            id="all-skills-all"
-            value={filters.skills_all}
-            onChange={(next) => update("skills_all", next)}
-            placeholder="python, postgres"
-            ariaLabel="Match candidates with all of these skills"
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="label" htmlFor="all-exp-min">Min exp</label>
-            <input
-              id="all-exp-min"
-              className="input"
-              type="number"
-              min={0}
-              value={filters.exp_min}
-              onChange={(e) => update("exp_min", e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor="all-exp-max">Max exp</label>
-            <input
-              id="all-exp-max"
-              className="input"
-              type="number"
-              min={0}
-              value={filters.exp_max}
-              onChange={(e) => update("exp_max", e.target.value)}
-            />
-          </div>
-        </div>
-        <div>
-          <label className="label" htmlFor="all-current-ctc">Max current CTC</label>
-          <input
-            id="all-current-ctc"
-            className="input"
-            type="number"
-            min={0}
-            value={filters.current_ctc_max}
-            onChange={(e) => update("current_ctc_max", e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="all-expected-ctc">Max expected CTC</label>
-          <input
-            id="all-expected-ctc"
-            className="input"
-            type="number"
-            min={0}
-            value={filters.expected_ctc_max}
-            onChange={(e) => update("expected_ctc_max", e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="all-notice-bucket">Notice period</label>
-          <select
-            id="all-notice-bucket"
-            className="input"
-            value={filters.notice_max_days}
-            onChange={(e) => update("notice_max_days", e.target.value)}
-          >
-            <option value="">Any</option>
-            <option value="0">Immediate joiner</option>
-            <option value="15">≤ 15 days</option>
-            <option value="30">≤ 30 days</option>
-            <option value="60">≤ 60 days</option>
-            <option value="90">≤ 90 days</option>
-          </select>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="label" htmlFor="all-applied-after">Applied after</label>
-            <input
-              id="all-applied-after"
-              className="input"
-              type="date"
-              value={filters.applied_after}
-              onChange={(e) => update("applied_after", e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor="all-applied-before">Applied before</label>
-            <input
-              id="all-applied-before"
-              className="input"
-              type="date"
-              value={filters.applied_before}
-              onChange={(e) => update("applied_before", e.target.value)}
-            />
-          </div>
-        </div>
-        <div>
-          <label className="label" htmlFor="all-sort">Sort by</label>
-          <select
-            id="all-sort"
-            className="input"
-            value={filters.sort}
-            onChange={(e) => update("sort", e.target.value as FilterForm["sort"])}
-          >
-            <option value="recent">Most recent</option>
-            <option value="expected_ctc">Lowest expected CTC</option>
-            <option value="notice">Shortest notice period</option>
-            <option value="experience">Most experienced</option>
-          </select>
-        </div>
-        <button onClick={() => setFilters(EMPTY)} className="btn-secondary w-full text-sm">
-          Reset filters
-        </button>
-      </aside>
+      </ApplicantFilterSidebar>
 
       <section className="space-y-4">
         <div>
@@ -304,7 +120,9 @@ export function HrAllApplicantsPage() {
             <button
               key={s}
               type="button"
-              onClick={() => update("stage", filters.stage === s ? "" : s)}
+              onClick={() =>
+                setFilters((f) => ({ ...f, stage: f.stage === s ? "" : s }))
+              }
               className={`card flex flex-col items-start text-left transition ${
                 filters.stage === s ? "ring-2 ring-brand-500" : "hover:bg-slate-50"
               }`}
@@ -313,7 +131,9 @@ export function HrAllApplicantsPage() {
               <span className="text-xs uppercase tracking-wider text-slate-500">
                 {stageLabel(s)}
               </span>
-              <span className="mt-1 text-xl font-semibold text-slate-900">{totals[s]}</span>
+              <span className="mt-1 text-xl font-semibold text-slate-900">
+                {totals[s]}
+              </span>
             </button>
           ))}
         </div>
@@ -325,96 +145,16 @@ export function HrAllApplicantsPage() {
         </div>
 
         {applicants.length === 0 ? (
-          <div className="card text-slate-500">No applicants match these filters yet.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 rounded-lg bg-white text-sm ring-1 ring-slate-200">
-              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
-                <tr>
-                  <th scope="col" className="px-3 py-2">Applicant</th>
-                  <th scope="col" className="px-3 py-2">Applied to</th>
-                  <th scope="col" className="px-3 py-2">Exp</th>
-                  <th scope="col" className="px-3 py-2">Current</th>
-                  <th scope="col" className="px-3 py-2">Expected</th>
-                  <th scope="col" className="px-3 py-2">Notice</th>
-                  <th scope="col" className="px-3 py-2">Skills</th>
-                  <th scope="col" className="px-3 py-2">Applied</th>
-                  <th scope="col" className="px-3 py-2">Stage</th>
-                  <th scope="col" className="px-3 py-2"><span className="sr-only">Profile</span></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {applicants.map((a) => (
-                  <tr key={a.id}>
-                    <td className="px-3 py-2">
-                      <div className="font-medium text-slate-700">#{a.id}</div>
-                      <div className="text-xs text-slate-500">
-                        {a.years_experience}y · {a.notice_period_days}d notice
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      {a.job ? (
-                        <Link
-                          to={`/hr/jobs/${a.job.id}/applicants`}
-                          className="text-slate-900 hover:text-brand-700"
-                        >
-                          {a.job.title}
-                        </Link>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                      {a.job ? (
-                        <div className="text-xs text-slate-500">{a.job.department}</div>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2 text-slate-700">{a.years_experience}y</td>
-                    <td className="px-3 py-2 text-slate-700">{formatCtc(a.current_ctc)}</td>
-                    <td className="px-3 py-2 text-slate-700">{formatCtc(a.expected_ctc)}</td>
-                    <td className="px-3 py-2 text-slate-700">{a.notice_period_days}d</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {a.skills.slice(0, 4).map((s) => (
-                          <span key={s} className="badge bg-brand-50 text-brand-700">
-                            {s}
-                          </span>
-                        ))}
-                        {a.skills.length > 4 ? (
-                          <span className="text-xs text-slate-500">+{a.skills.length - 4}</span>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-slate-500">{formatRelative(a.created_at)}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-col gap-1">
-                        <StageBadge stage={a.stage} />
-                        <select
-                          className="input py-0.5 text-xs"
-                          value={a.stage}
-                          onChange={(e) => setStage(a.id, e.target.value as ApplicationStage)}
-                          aria-label={`Change stage for applicant ${a.id}`}
-                        >
-                          {APPLICATION_STAGES.map((s) => (
-                            <option key={s} value={s}>
-                              {stageLabel(s)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        onClick={() => setNotesFor(a)}
-                        className="text-xs text-brand-600 hover:underline"
-                        aria-label={`View profile for applicant ${a.id}`}
-                      >
-                        View profile
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="card text-slate-500">
+            No applicants match these filters yet.
           </div>
+        ) : (
+          <ApplicantsTable
+            applicants={applicants}
+            showJobColumn
+            onStageChange={setStage}
+            onProfileOpen={setNotesFor}
+          />
         )}
       </section>
 
