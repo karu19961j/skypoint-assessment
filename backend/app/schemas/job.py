@@ -33,6 +33,10 @@ class JobCreate(JobBase):
 
 
 class JobUpdate(BaseModel):
+    # Note: `status` is intentionally NOT part of this schema. Status
+    # transitions go through the dedicated PATCH /jobs/{id}/status endpoint
+    # so we have one place to add transition guards (e.g. "can a closed job
+    # be reopened?") and one place to invalidate any future cache.
     title: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
     department: str | None = Field(default=None, min_length=1, max_length=100)
@@ -44,7 +48,6 @@ class JobUpdate(BaseModel):
     ctc_max: int | None = Field(default=None, ge=0)
     skills: list[str] | None = None
     deadline: date | None = None
-    status: JobStatus | None = None
 
 
 class JobStatusUpdate(BaseModel):

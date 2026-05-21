@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.deps import CurrentUser, DbSession
-from app.models import User
+from app.models import User, UserRole
 from app.schemas.auth import LoginIn, RegisterIn, TokenOut
 from app.schemas.user import UserOut
 from app.security import create_access_token, hash_password, verify_password
@@ -12,6 +13,15 @@ router = APIRouter()
 
 @router.post("/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterIn, db: DbSession) -> TokenOut:
+    # HR self-service signup is gated by an env flag. In production HR
+    # accounts should be provisioned via invite/admin; the public form only
+    # accepts candidate registrations.
+    if payload.role != UserRole.candidate and not get_settings().allow_hr_self_register:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="HR accounts are provisioned by administrators, not via self-signup.",
+        )
+
     existing = db.scalar(select(User).where(User.email == payload.email.lower()))
     if existing is not None:
         raise HTTPException(

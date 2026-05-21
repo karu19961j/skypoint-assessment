@@ -27,6 +27,7 @@ def get_current_user(
         if user_id_raw is None:
             raise ValueError("missing sub")
         user_id = int(user_id_raw)
+        role_claim = payload.get("role")
     except (ValueError, TypeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -38,6 +39,16 @@ def get_current_user(
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists"
+        )
+    # The role claim must still match the DB. Today the role never changes, so
+    # this is mostly defence-in-depth — but it forecloses a privilege-escalation
+    # window if we ever add role demotion (a token issued while the user was HR
+    # would otherwise still grant HR access after the demotion until expiry).
+    if role_claim != user.role.value:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token does not match current account role.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     return user
 

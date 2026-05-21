@@ -1,7 +1,8 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.deps import DbSession, require_role
 from app.models import Bookmark, Job, JobStatus, User, UserRole
@@ -33,9 +34,20 @@ def list_bookmarks(
     ]
 
 
+def _bookmark_out(bookmark: Bookmark) -> BookmarkOut:
+    return BookmarkOut(
+        id=bookmark.id,
+        job_id=bookmark.job_id,
+        candidate_id=bookmark.candidate_id,
+        created_at=bookmark.created_at,
+        job=JobOut.model_validate(bookmark.job) if bookmark.job else None,
+    )
+
+
 @router.post("/", response_model=BookmarkOut, status_code=status.HTTP_201_CREATED)
 def create_bookmark(
     payload: BookmarkCreate,
+    response: Response,
     db: DbSession,
     current_user: Annotated[User, Depends(require_role(UserRole.candidate))],
 ) -> BookmarkOut:
@@ -50,25 +62,32 @@ def create_bookmark(
         )
     )
     if existing is not None:
-        return BookmarkOut(
-            id=existing.id,
-            job_id=existing.job_id,
-            candidate_id=existing.candidate_id,
-            created_at=existing.created_at,
-            job=JobOut.model_validate(existing.job) if existing.job else None,
-        )
+        # Idempotent: same bookmark, no DB write. Reflect that as 200 OK.
+        response.status_code = status.HTTP_200_OK
+        return _bookmark_out(existing)
 
     bookmark = Bookmark(candidate_id=current_user.id, job_id=payload.job_id)
     db.add(bookmark)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Race: another concurrent POST inserted the same (candidate_id, job_id).
+        # The unique constraint is authoritative; return the existing row.
+        db.rollback()
+        existing = db.scalar(
+            select(Bookmark).where(
+                Bookmark.candidate_id == current_user.id,
+                Bookmark.job_id == payload.job_id,
+            )
+        )
+        if existing is None:  # pragma: no cover — defensive, should not happen
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Could not save bookmark."
+            ) from None
+        response.status_code = status.HTTP_200_OK
+        return _bookmark_out(existing)
     db.refresh(bookmark)
-    return BookmarkOut(
-        id=bookmark.id,
-        job_id=bookmark.job_id,
-        candidate_id=bookmark.candidate_id,
-        created_at=bookmark.created_at,
-        job=JobOut.model_validate(bookmark.job) if bookmark.job else None,
-    )
+    return _bookmark_out(bookmark)
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)

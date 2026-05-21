@@ -10,6 +10,7 @@ import time
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
+from app.config import get_settings
 from app.db import engine
 from app.models import Base
 from app.seed import run_seed
@@ -33,6 +34,7 @@ def wait_for_db(retries: int = 30, delay: float = 1.0) -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    get_settings().assert_production_ready()
     wait_for_db()
     Base.metadata.create_all(bind=engine)
     run_seed()

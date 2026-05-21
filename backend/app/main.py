@@ -17,9 +17,12 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Auth uses `Authorization: Bearer …` headers (no cookies), so credentials
+    # are not needed on cross-origin requests. Keeping this False also avoids
+    # the CSRF-shaped footgun a future cookie-based session would inherit.
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])

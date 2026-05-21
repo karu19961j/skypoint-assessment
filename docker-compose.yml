@@ -30,6 +30,7 @@ services:
       SEED_HR_PASSWORD: ${SEED_HR_PASSWORD}
       SEED_CANDIDATE_EMAIL: ${SEED_CANDIDATE_EMAIL}
       SEED_CANDIDATE_PASSWORD: ${SEED_CANDIDATE_PASSWORD}
+      ALLOW_HR_SELF_REGISTER: ${ALLOW_HR_SELF_REGISTER:-false}
     depends_on:
       postgres:
         condition: service_healthy
