@@ -41,7 +41,7 @@ def upsert_profile(
     profile.skills = payload.skills
     profile.years_experience = payload.years_experience
     profile.expected_ctc = payload.expected_ctc
-    profile.preferred_location = payload.preferred_location
+    profile.preferred_locations = [loc.value for loc in payload.preferred_locations]
 
     db.commit()
     db.refresh(profile)

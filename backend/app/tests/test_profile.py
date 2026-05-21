@@ -19,15 +19,16 @@ def test_profile_create_get_update_delete(
             "skills": ["python", "fastapi"],
             "years_experience": 4,
             "expected_ctc": 2_000_000,
-            "preferred_location": "remote",
+            "preferred_locations": ["remote"],
         },
     )
     assert resp.status_code == 200
     saved = resp.json()
     assert saved["skills"] == ["python", "fastapi"]
     assert saved["years_experience"] == 4
+    assert saved["preferred_locations"] == ["remote"]
 
-    # Update via PUT (upsert path)
+    # Update via PUT (upsert path) — multi-select two locations
     resp = client.put(
         "/api/profile/",
         headers=candidate_headers,
@@ -35,11 +36,11 @@ def test_profile_create_get_update_delete(
             "skills": ["python", "fastapi", "postgres"],
             "years_experience": 5,
             "expected_ctc": 2_400_000,
-            "preferred_location": "hybrid",
+            "preferred_locations": ["remote", "hybrid", "remote"],  # duplicate stripped server-side
         },
     )
     assert resp.json()["years_experience"] == 5
-    assert resp.json()["preferred_location"] == "hybrid"
+    assert resp.json()["preferred_locations"] == ["remote", "hybrid"]
 
     # GET shows the updated profile
     resp = client.get("/api/profile/", headers=candidate_headers)
@@ -65,7 +66,7 @@ def test_profile_is_candidate_only(
             "skills": ["x"],
             "years_experience": 0,
             "expected_ctc": 0,
-            "preferred_location": None,
+            "preferred_locations": [],
         },
     )
     assert resp.status_code == 403
@@ -90,7 +91,7 @@ def test_recommendations_require_profile(
             "skills": ["python", "fastapi"],
             "years_experience": 3,
             "expected_ctc": 2_000_000,
-            "preferred_location": "remote",
+            "preferred_locations": ["remote", "hybrid"],
         },
     )
     resp = client.get("/api/jobs/recommended", headers=candidate_headers)

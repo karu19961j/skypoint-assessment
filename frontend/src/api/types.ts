@@ -149,7 +149,7 @@ export interface CandidateProfile {
   skills: string[];
   years_experience: number;
   expected_ctc: number;
-  preferred_location: LocationType | null;
+  preferred_locations: LocationType[];
   created_at: string;
 }
 
@@ -157,7 +157,7 @@ export interface ProfileUpsert {
   skills: string[];
   years_experience: number;
   expected_ctc: number;
-  preferred_location: LocationType | null;
+  preferred_locations: LocationType[];
 }
 
 export interface Bookmark {

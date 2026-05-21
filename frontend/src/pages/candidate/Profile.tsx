@@ -13,16 +13,22 @@ import { TagInput } from "@/components/TagInput";
 const schema = z.object({
   years_experience: z.coerce.number().int().min(0).max(60),
   expected_ctc: z.coerce.number().int().min(0),
-  preferred_location: z.union([z.literal(""), z.enum(["remote", "hybrid", "onsite"])]),
 });
 
 type FormValues = z.infer<typeof schema>;
+
+const LOCATION_OPTIONS: { value: LocationType; label: string }[] = [
+  { value: "remote", label: "Remote" },
+  { value: "hybrid", label: "Hybrid" },
+  { value: "onsite", label: "On-site" },
+];
 
 export function CandidateProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [hasProfile, setHasProfile] = useState(false);
   const [skills, setSkills] = useState<string[]>([]);
+  const [locations, setLocations] = useState<LocationType[]>([]);
 
   const {
     register,
@@ -34,7 +40,6 @@ export function CandidateProfilePage() {
     defaultValues: {
       years_experience: 0,
       expected_ctc: 0,
-      preferred_location: "",
     },
   });
 
@@ -45,16 +50,22 @@ export function CandidateProfilePage() {
         if (!profile) return;
         setHasProfile(true);
         setSkills(profile.skills);
+        setLocations(profile.preferred_locations);
         reset({
           years_experience: profile.years_experience,
           expected_ctc: profile.expected_ctc,
-          preferred_location: profile.preferred_location ?? "",
         });
       })
       .catch((err) => {
         if (err instanceof ApiError) setError(err.detail);
       });
   }, [reset]);
+
+  const toggleLocation = (loc: LocationType) => {
+    setLocations((prev) =>
+      prev.includes(loc) ? prev.filter((l) => l !== loc) : [...prev, loc],
+    );
+  };
 
   const onSubmit = handleSubmit(async (values) => {
     setError(null);
@@ -64,7 +75,7 @@ export function CandidateProfilePage() {
         skills,
         years_experience: values.years_experience,
         expected_ctc: values.expected_ctc,
-        preferred_location: values.preferred_location ? (values.preferred_location as LocationType) : null,
+        preferred_locations: locations,
       });
       setHasProfile(true);
       setSaved(true);
@@ -79,7 +90,8 @@ export function CandidateProfilePage() {
       await profileApi.remove();
       setHasProfile(false);
       setSkills([]);
-      reset({ years_experience: 0, expected_ctc: 0, preferred_location: "" });
+      setLocations([]);
+      reset({ years_experience: 0, expected_ctc: 0 });
       setSaved(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Could not clear profile");
@@ -98,6 +110,9 @@ export function CandidateProfilePage() {
           tab. Your profile is private &mdash; HR sees only the fields you submit per
           application.
         </p>
+        <p className="mt-2 text-xs text-slate-500">
+          Fields marked <span className="text-rose-600">*</span> are required.
+        </p>
       </header>
 
       <form onSubmit={onSubmit} className="card space-y-4" noValidate>
@@ -109,7 +124,10 @@ export function CandidateProfilePage() {
         ) : null}
 
         <div>
-          <label className="label" htmlFor="profile-skills">Your skills</label>
+          <label className="label" htmlFor="profile-skills">
+            Your skills <span aria-hidden="true" className="text-rose-600">*</span>
+            <span className="sr-only"> (required)</span>
+          </label>
           <TagInput
             id="profile-skills"
             value={skills}
@@ -123,49 +141,78 @@ export function CandidateProfilePage() {
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="label" htmlFor="profile-yoe">Years of experience</label>
+            <label className="label" htmlFor="profile-yoe">
+              Years of experience <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="profile-yoe"
               className="input"
               type="number"
               min={0}
+              aria-required="true"
               aria-invalid={errors.years_experience ? "true" : undefined}
               aria-describedby={errors.years_experience ? "profile-yoe-error" : undefined}
               {...register("years_experience")}
             />
             {errors.years_experience ? (
-              <p id="profile-yoe-error" className="mt-1 text-xs text-rose-600" role="alert">{errors.years_experience.message}</p>
+              <p id="profile-yoe-error" className="mt-1 text-xs text-rose-600" role="alert">
+                {errors.years_experience.message}
+              </p>
             ) : null}
           </div>
           <div>
-            <label className="label" htmlFor="profile-ctc">Expected CTC (₹/year)</label>
+            <label className="label" htmlFor="profile-ctc">
+              Expected CTC (₹/year) <span aria-hidden="true" className="text-rose-600">*</span>
+              <span className="sr-only"> (required)</span>
+            </label>
             <input
               id="profile-ctc"
               className="input"
               type="number"
               min={0}
+              aria-required="true"
               aria-invalid={errors.expected_ctc ? "true" : undefined}
               aria-describedby={errors.expected_ctc ? "profile-ctc-error" : undefined}
               {...register("expected_ctc")}
             />
             {errors.expected_ctc ? (
-              <p id="profile-ctc-error" className="mt-1 text-xs text-rose-600" role="alert">{errors.expected_ctc.message}</p>
+              <p id="profile-ctc-error" className="mt-1 text-xs text-rose-600" role="alert">
+                {errors.expected_ctc.message}
+              </p>
             ) : null}
           </div>
         </div>
-        <div>
-          <label className="label" htmlFor="profile-location">Preferred location</label>
-          <select
-            id="profile-location"
-            className="input"
-            {...register("preferred_location")}
-          >
-            <option value="">No preference</option>
-            <option value="remote">Remote</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="onsite">On-site</option>
-          </select>
-        </div>
+        <fieldset>
+          <legend className="label mb-0">Preferred locations</legend>
+          <p className="mb-2 text-xs text-slate-500">
+            Pick any combination. A job matching at least one of these gets a
+            +10 location-fit bonus in your recommendations.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {LOCATION_OPTIONS.map((opt) => {
+              const checked = locations.includes(opt.value);
+              return (
+                <label
+                  key={opt.value}
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition ${
+                    checked
+                      ? "border-brand-500 bg-brand-50 text-brand-700"
+                      : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    checked={checked}
+                    onChange={() => toggleLocation(opt.value)}
+                  />
+                  {opt.label}
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
 
         <div className="flex flex-wrap justify-between gap-2">
           {hasProfile ? (
@@ -174,7 +221,13 @@ export function CandidateProfilePage() {
             </button>
           ) : <span />}
           <button type="submit" className="btn-primary" disabled={isSubmitting}>
-            {isSubmitting ? "Saving…" : hasProfile ? (isDirty || skills.length > 0 ? "Save changes" : "Saved") : "Save profile"}
+            {isSubmitting
+              ? "Saving…"
+              : hasProfile
+                ? isDirty || skills.length > 0 || locations.length > 0
+                  ? "Save changes"
+                  : "Saved"
+                : "Save profile"}
           </button>
         </div>
       </form>

@@ -84,7 +84,7 @@ def test_recommendation_score_adds_location_bonus_for_match():
         profile_skills=["python"],
         profile_years=5,
         profile_expected_ctc=2_000_000,
-        profile_preferred_location="remote",
+        profile_preferred_locations=["remote", "hybrid"],
     )
     assert matched.location == 10
     assert matched.total == min(100, matched.skill + matched.exp + matched.ctc + matched.location)
@@ -101,9 +101,27 @@ def test_recommendation_score_no_location_bonus_when_mismatched():
         profile_skills=["python"],
         profile_years=5,
         profile_expected_ctc=2_000_000,
-        profile_preferred_location="remote",
+        profile_preferred_locations=["remote"],
     )
     assert mismatched.location == 0
+
+
+def test_recommendation_score_no_bonus_when_no_preferences():
+    """Empty preferred_locations list means 'no preference' — the bonus
+    is zero but it never penalises."""
+    no_pref = score_job_for_profile(
+        job_required_skills=["python"],
+        job_exp_min=0,
+        job_exp_max=10,
+        job_ctc_min=0,
+        job_ctc_max=5_000_000,
+        job_location_type="remote",
+        profile_skills=["python"],
+        profile_years=5,
+        profile_expected_ctc=2_000_000,
+        profile_preferred_locations=[],
+    )
+    assert no_pref.location == 0
 
 
 # ---------- Endpoint integration ----------

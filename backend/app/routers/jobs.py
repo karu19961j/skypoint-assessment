@@ -171,9 +171,7 @@ def recommended_jobs(
             profile_skills=profile.skills,
             profile_years=profile.years_experience,
             profile_expected_ctc=profile.expected_ctc,
-            profile_preferred_location=(
-                profile.preferred_location.value if profile.preferred_location else None
-            ),
+            profile_preferred_locations=list(profile.preferred_locations or []),
         )
         scored.append(
             RecommendedJobOut(

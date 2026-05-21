@@ -124,14 +124,19 @@ def score_job_for_profile(
     profile_skills: list[str],
     profile_years: int,
     profile_expected_ctc: int,
-    profile_preferred_location: str | None,
+    profile_preferred_locations: list[str],
 ) -> ScoreBreakdown:
-    """Mirror of score_application_for_job, with a +10 location-match bonus."""
+    """Mirror of score_application_for_job, with a +10 location-match bonus.
+
+    The bonus fires when the job's location_type appears in the candidate's
+    set of preferred locations. An empty list means "no preference" and the
+    bonus stays at zero (i.e. it never penalises, it only rewards a match).
+    """
     skill, matched = _skill_match_score(job_required_skills, profile_skills)
     exp = _experience_fit_score(profile_years, job_exp_min, job_exp_max)
     ctc = _ctc_alignment_score(profile_expected_ctc, job_ctc_min, job_ctc_max)
     notice = 0  # candidate profile has no notice period; that's per-application
-    location = 10 if (profile_preferred_location and profile_preferred_location == job_location_type) else 0
+    location = 10 if job_location_type in profile_preferred_locations else 0
     total = min(100, skill + exp + ctc + notice + location)
     return ScoreBreakdown(
         total=total, skill=skill, exp=exp, ctc=ctc, notice=notice,
