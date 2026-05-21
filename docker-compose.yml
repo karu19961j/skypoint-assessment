@@ -36,6 +36,15 @@ services:
         condition: service_healthy
     expose:
       - "8000"
+    healthcheck:
+      # Healthy = `/api/health` returns 200 AND reports `db: ok` (the
+      # bootstrap migration + seed has finished). The frontend depends on
+      # this state so nginx never proxies to a half-warm backend.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health | grep -q '\"db\":\"ok\"'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
     networks:
       - jobportal
 
@@ -44,7 +53,8 @@ services:
       context: ./frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "5173:80"
     networks:
