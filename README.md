@@ -158,7 +158,9 @@ For local frontend development without Docker, `cd frontend && npm install && np
 | HR        | `hr@test.com`          | `Hr@1234`        |
 | Candidate | `candidate@test.com`   | `Candidate@1234` |
 
-The HR user owns five sample jobs and the candidate has two seeded applications on the pipeline, so both dashboards have something to look at on first login. Two additional demo candidates (`rohan.designer@test.com`, `sneha.engineer@test.com`, both `Test@1234`) populate the HR pipeline for filtering demos.
+The seed populates the demo with realistic volume on first boot: the HR user owns **~25 jobs across ten departments**, the primary candidate has two seeded applications, and a pool of **20 additional demo candidates** (shared password `Test@1234`) fills the HR pipeline with **~200 applications** distributed across the six stages. That's enough data to exercise infinite scroll on the candidate browse, every applicant filter, the HR funnel cards, ranking, and the top-5 dashboard table without manually creating anything.
+
+Seed is deterministic (`random.seed(42)`) so the demo dataset is identical on every fresh boot. To reset to the freshly-seeded state after you've been clicking around, run `docker compose down -v && docker compose up --build` — the `-v` drops the postgres volume so the bootstrap re-runs from scratch.
 
 **HR self-registration is disabled by default** (`ALLOW_HR_SELF_REGISTER=false`); the public `/register` form only accepts candidates. HR accounts ship via the seed.
 

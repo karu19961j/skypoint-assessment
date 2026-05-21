@@ -1,9 +1,31 @@
-"""Idempotent seed of test users + sample jobs/applications.
+"""Idempotent seed of demo users, jobs, applications, and pipeline events.
 
-Re-running this is safe: existence checks gate every insert.
+Two scales of seed live here in one file:
+
+  - **Documented anchors** (always present): the demo HR + demo
+    candidate the README points the assessor at, plus a couple of extra
+    candidates that show up as "other applicants" in HR-side examples.
+  - **Bulk demo data** (generated): ~25 jobs across departments, ~20
+    extra candidates with varied skills/CTC/experience, ~200
+    applications spread across the six pipeline stages. Enough volume
+    that both the candidate browse page (infinite scroll) and the HR
+    dashboard (per-stage funnels) actually look like a working hiring
+    portal on first boot.
+
+Determinism: every random pick goes through a single `random.Random(42)`
+instance so the seed is reproducible — re-run on a fresh `docker compose
+down -v` and you get the exact same dataset.
+
+Idempotency: the anchor-user existence check + the "HR already has jobs"
+check together gate the whole bulk generation. Re-running run_seed() on
+a populated DB is a no-op.
 """
 
+from __future__ import annotations
+
 import logging
+import random
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from sqlalchemy import select
@@ -28,6 +50,14 @@ from app.security import hash_password
 logger = logging.getLogger(__name__)
 
 
+# Deterministic randomness — same seed → same demo data on every fresh
+# boot. The number itself doesn't matter; pinning it is what matters.
+_RNG = random.Random(42)
+
+
+# ---------- user helpers ----------
+
+
 def _get_or_create_user(
     db: Session, *, email: str, password: str, full_name: str, role: UserRole
 ) -> User:
@@ -46,88 +76,277 @@ def _get_or_create_user(
     return user
 
 
+# ---------- candidate pool ----------
+#
+# Twenty extra demo candidates so the HR "Candidate inbox" and per-job
+# applicant lists feel populated. Names span Indian and Western — the
+# product targets a multi-region hiring use case, and the seed should
+# reflect that. Skills/CTC vary so HR filters actually prune.
+
+
+@dataclass
+class _CandidateSpec:
+    full_name: str
+    email: str
+    skills: list[str]
+    years_experience: int
+    base_ctc: int
+
+
+_CANDIDATE_POOL: list[_CandidateSpec] = [
+    _CandidateSpec("Rohan Mehta", "rohan.designer@test.com", ["figma", "ui-ux", "css"], 5, 1_800_000),
+    _CandidateSpec("Sneha Patel", "sneha.engineer@test.com", ["python", "django", "postgres"], 7, 2_800_000),
+    _CandidateSpec("Aisha Khan", "aisha.k@test.com", ["python", "fastapi", "kafka", "aws"], 8, 3_400_000),
+    _CandidateSpec("Vikram Singh", "vikram.s@test.com", ["java", "spring", "kafka"], 6, 2_200_000),
+    _CandidateSpec("Priya Iyer", "priya.iyer@test.com", ["react", "typescript", "redux"], 4, 1_900_000),
+    _CandidateSpec("Karan Joshi", "karan.j@test.com", ["go", "docker", "kubernetes"], 5, 2_400_000),
+    _CandidateSpec("Liam O'Connor", "liam.o@test.com", ["python", "data-engineering", "spark"], 9, 3_800_000),
+    _CandidateSpec("Mei Tanaka", "mei.tanaka@test.com", ["react", "next-js", "graphql"], 3, 1_500_000),
+    _CandidateSpec("Daniel García", "daniel.g@test.com", ["sql", "python", "tableau"], 4, 1_600_000),
+    _CandidateSpec("Ananya Roy", "ananya.r@test.com", ["python", "machine-learning", "pytorch"], 6, 2_600_000),
+    _CandidateSpec("Faisal Ahmed", "faisal.a@test.com", ["terraform", "aws", "github-actions"], 7, 3_000_000),
+    _CandidateSpec("Hannah Müller", "hannah.m@test.com", ["product-design", "figma", "user-research"], 5, 1_900_000),
+    _CandidateSpec("Rahul Verma", "rahul.v@test.com", ["python", "fastapi", "docker", "postgres"], 3, 1_400_000),
+    _CandidateSpec("Olivia Brooks", "olivia.b@test.com", ["javascript", "node", "express"], 4, 1_700_000),
+    _CandidateSpec("Saanvi Reddy", "saanvi.r@test.com", ["sql", "looker", "bigquery"], 2, 1_100_000),
+    _CandidateSpec("Mateo Rossi", "mateo.r@test.com", ["rust", "systems-programming"], 8, 3_500_000),
+    _CandidateSpec("Tanvi Shah", "tanvi.s@test.com", ["react", "typescript", "tailwind", "vite"], 5, 2_000_000),
+    _CandidateSpec("Jonas Becker", "jonas.b@test.com", ["go", "grpc", "kubernetes"], 6, 2_700_000),
+    _CandidateSpec("Riya Banerjee", "riya.b@test.com", ["data-science", "python", "r"], 5, 2_300_000),
+    _CandidateSpec("Aaron Wright", "aaron.w@test.com", ["sales-operations", "salesforce", "sql"], 6, 1_800_000),
+]
+
+
+def _seed_candidates(db: Session) -> list[User]:
+    users: list[User] = []
+    for spec in _CANDIDATE_POOL:
+        user = _get_or_create_user(
+            db,
+            email=spec.email,
+            password="Test@1234",
+            full_name=spec.full_name,
+            role=UserRole.candidate,
+        )
+        users.append(user)
+    return users
+
+
+# ---------- job catalogue ----------
+#
+# ~25 jobs across departments. Each job gets a deadline `random` days
+# out from today so the deadline pill on the candidate browse shows a
+# mix of urgent / comfortable timelines.
+
+
+@dataclass
+class _JobSpec:
+    title: str
+    department: str
+    location: LocationType
+    employment: EmploymentType
+    exp_min: int
+    exp_max: int
+    ctc_min: int
+    ctc_max: int
+    skills: list[str]
+    description: str
+
+
+_JOB_CATALOGUE: list[_JobSpec] = [
+    # ---------- Engineering ----------
+    _JobSpec(
+        "Senior Backend Engineer", "Engineering", LocationType.remote, EmploymentType.full_time,
+        5, 9, 2_500_000, 4_000_000,
+        ["python", "fastapi", "postgres", "aws"],
+        "Build and operate the API platform powering our customer-facing apps. You'll own services end to end — design, code, deploy, and on-call.",
+    ),
+    _JobSpec(
+        "Backend Engineer (Mid-level)", "Engineering", LocationType.hybrid, EmploymentType.full_time,
+        2, 5, 1_400_000, 2_500_000,
+        ["python", "django", "postgres"],
+        "Help us ship the next set of platform services. Strong Python + Postgres background needed.",
+    ),
+    _JobSpec(
+        "Frontend Engineer (React)", "Engineering", LocationType.hybrid, EmploymentType.full_time,
+        2, 5, 1_500_000, 2_800_000,
+        ["react", "typescript", "tailwind"],
+        "Help build the next-gen hiring portal UI. Strong React + TypeScript needed.",
+    ),
+    _JobSpec(
+        "Senior Frontend Engineer", "Engineering", LocationType.remote, EmploymentType.full_time,
+        5, 9, 2_600_000, 4_200_000,
+        ["react", "typescript", "graphql", "vite"],
+        "Own the candidate-facing surface. Performance + accessibility focus.",
+    ),
+    _JobSpec(
+        "Full-stack Engineer", "Engineering", LocationType.remote, EmploymentType.full_time,
+        3, 6, 1_800_000, 3_000_000,
+        ["python", "fastapi", "react", "typescript"],
+        "Roll across the stack — same week could be query plans and component refactors.",
+    ),
+    _JobSpec(
+        "Engineering Manager", "Engineering", LocationType.hybrid, EmploymentType.full_time,
+        7, 12, 3_500_000, 5_500_000,
+        ["leadership", "system-design", "mentoring"],
+        "Lead one of our platform pods. We expect hands-on technical depth and people-first leadership.",
+    ),
+    _JobSpec(
+        "Engineering Intern", "Engineering", LocationType.onsite, EmploymentType.internship,
+        0, 1, 300_000, 500_000,
+        ["python", "react"],
+        "Summer internship across backend and frontend. Mentored project.",
+    ),
+    _JobSpec(
+        "Mobile Engineer (React Native)", "Engineering", LocationType.remote, EmploymentType.full_time,
+        3, 7, 1_800_000, 3_200_000,
+        ["react-native", "typescript", "ios", "android"],
+        "Bring the portal to mobile. iOS + Android shipped on a shared React Native codebase.",
+    ),
+
+    # ---------- Data ----------
+    _JobSpec(
+        "Data Analyst", "Data", LocationType.onsite, EmploymentType.full_time,
+        1, 4, 1_000_000, 1_800_000,
+        ["sql", "python", "tableau"],
+        "Partner with Product and Ops to turn data into decisions. SQL fluency required.",
+    ),
+    _JobSpec(
+        "Senior Data Engineer", "Data", LocationType.remote, EmploymentType.full_time,
+        5, 9, 2_400_000, 4_000_000,
+        ["python", "spark", "airflow", "bigquery"],
+        "Own the pipelines that feed every dashboard. Strong Python + Spark + warehouse experience needed.",
+    ),
+    _JobSpec(
+        "ML Engineer", "Data", LocationType.hybrid, EmploymentType.full_time,
+        4, 8, 2_500_000, 4_200_000,
+        ["python", "pytorch", "machine-learning", "aws"],
+        "Productionise models — from notebook to gRPC service. Hands-on ML + systems background.",
+    ),
+    _JobSpec(
+        "BI Developer", "Data", LocationType.remote, EmploymentType.contract,
+        2, 5, 1_200_000, 2_200_000,
+        ["sql", "looker", "tableau", "dbt"],
+        "Six-month contract to stand up our BI layer. Looker + dbt expertise required.",
+    ),
+
+    # ---------- Platform / DevOps ----------
+    _JobSpec(
+        "DevOps Contractor", "Platform", LocationType.remote, EmploymentType.contract,
+        4, 10, 2_000_000, 3_500_000,
+        ["kubernetes", "terraform", "aws", "github-actions"],
+        "6-month engagement to harden our CI/CD and Kubernetes setup.",
+    ),
+    _JobSpec(
+        "Site Reliability Engineer", "Platform", LocationType.hybrid, EmploymentType.full_time,
+        4, 8, 2_400_000, 4_000_000,
+        ["aws", "kubernetes", "terraform", "observability"],
+        "On-call rotation + reliability projects. Improve our SLOs end-to-end.",
+    ),
+    _JobSpec(
+        "Security Engineer", "Platform", LocationType.remote, EmploymentType.full_time,
+        4, 9, 2_600_000, 4_200_000,
+        ["application-security", "appsec", "aws"],
+        "Threat-model + audit our services. Drive security-by-default into every team.",
+    ),
+
+    # ---------- Design ----------
+    _JobSpec(
+        "Product Designer", "Design", LocationType.hybrid, EmploymentType.full_time,
+        3, 7, 1_500_000, 2_800_000,
+        ["figma", "ui-ux", "user-research", "product-design"],
+        "Design end-to-end flows for the HR + candidate sides. Strong portfolio expected.",
+    ),
+    _JobSpec(
+        "UX Researcher", "Design", LocationType.remote, EmploymentType.full_time,
+        3, 7, 1_500_000, 2_600_000,
+        ["user-research", "interviewing", "synthesis"],
+        "Run discovery + usability research across both audiences. Partner closely with PM + design.",
+    ),
+
+    # ---------- Product ----------
+    _JobSpec(
+        "Product Manager", "Product", LocationType.hybrid, EmploymentType.full_time,
+        4, 8, 2_500_000, 4_000_000,
+        ["product-management", "roadmapping", "data-analysis"],
+        "Own a product surface. Drive discovery → launch → measurement, end to end.",
+    ),
+    _JobSpec(
+        "Associate Product Manager", "Product", LocationType.onsite, EmploymentType.full_time,
+        1, 3, 1_200_000, 1_800_000,
+        ["product-management", "analytics", "communication"],
+        "Junior PM role on the candidate-side surface. Strong analytical + communication skills.",
+    ),
+
+    # ---------- Sales ----------
+    _JobSpec(
+        "Account Executive", "Sales", LocationType.hybrid, EmploymentType.full_time,
+        3, 7, 1_500_000, 3_500_000,
+        ["b2b-sales", "salesforce", "negotiation"],
+        "Hunt + close mid-market accounts. Strong outbound + Salesforce skills.",
+    ),
+    _JobSpec(
+        "Sales Development Rep", "Sales", LocationType.onsite, EmploymentType.full_time,
+        0, 2, 600_000, 1_200_000,
+        ["outbound", "salesforce", "communication"],
+        "Top-of-funnel hunter. SDR → AE growth path.",
+    ),
+
+    # ---------- Marketing ----------
+    _JobSpec(
+        "Content Marketer", "Marketing", LocationType.remote, EmploymentType.full_time,
+        2, 5, 1_000_000, 1_800_000,
+        ["content-marketing", "seo", "writing"],
+        "Run our content engine — blog, social, long-form. SEO + writing required.",
+    ),
+    _JobSpec(
+        "Performance Marketing Manager", "Marketing", LocationType.hybrid, EmploymentType.full_time,
+        4, 7, 1_800_000, 3_000_000,
+        ["performance-marketing", "google-ads", "facebook-ads"],
+        "Own paid acquisition end-to-end. Strong analytics + creative-judgement combo.",
+    ),
+
+    # ---------- Customer Success ----------
+    _JobSpec(
+        "Customer Success Manager", "Customer Success", LocationType.remote, EmploymentType.full_time,
+        3, 6, 1_400_000, 2_400_000,
+        ["account-management", "customer-success", "communication"],
+        "Own retention + expansion for our top accounts. Strong technical curiosity expected.",
+    ),
+    _JobSpec(
+        "Implementation Engineer", "Customer Success", LocationType.hybrid, EmploymentType.full_time,
+        3, 6, 1_600_000, 2_800_000,
+        ["sql", "api-integration", "customer-success"],
+        "Technical onboarding for enterprise customers. SQL + REST + customer-facing experience.",
+    ),
+]
+
+
 def _seed_jobs(db: Session, hr: User) -> list[Job]:
     existing = db.scalars(select(Job).where(Job.hr_id == hr.id)).all()
     if existing:
         return list(existing)
 
     today = date.today()
-    jobs_data = [
-        dict(
-            title="Senior Backend Engineer",
-            description=(
-                "Build and operate the API platform powering our customer-facing apps. "
-                "You'll own services end to end — design, code, deploy, and on-call."
-            ),
-            department="Engineering",
-            location_type=LocationType.remote,
-            employment_type=EmploymentType.full_time,
-            exp_min=5,
-            exp_max=9,
-            ctc_min=2_500_000,
-            ctc_max=4_000_000,
-            skills=["python", "fastapi", "postgres", "aws"],
-            deadline=today + timedelta(days=30),
-        ),
-        dict(
-            title="Frontend Engineer (React)",
-            description=(
-                "Help build the next-gen hiring portal UI. Strong React + TypeScript needed."
-            ),
-            department="Engineering",
-            location_type=LocationType.hybrid,
-            employment_type=EmploymentType.full_time,
-            exp_min=2,
-            exp_max=5,
-            ctc_min=1_500_000,
-            ctc_max=2_800_000,
-            skills=["react", "typescript", "tailwind"],
-            deadline=today + timedelta(days=45),
-        ),
-        dict(
-            title="Data Analyst",
-            description="Partner with Product and Ops to turn data into decisions. SQL fluency required.",
-            department="Data",
-            location_type=LocationType.onsite,
-            employment_type=EmploymentType.full_time,
-            exp_min=1,
-            exp_max=4,
-            ctc_min=1_000_000,
-            ctc_max=1_800_000,
-            skills=["sql", "python", "tableau"],
-            deadline=today + timedelta(days=21),
-        ),
-        dict(
-            title="DevOps Contractor",
-            description="6-month engagement to harden our CI/CD and Kubernetes setup.",
-            department="Platform",
-            location_type=LocationType.remote,
-            employment_type=EmploymentType.contract,
-            exp_min=4,
-            exp_max=10,
-            ctc_min=2_000_000,
-            ctc_max=3_500_000,
-            skills=["kubernetes", "terraform", "aws", "github-actions"],
-            deadline=today + timedelta(days=14),
-        ),
-        dict(
-            title="Engineering Intern",
-            description="Summer internship across backend and frontend. Mentored project.",
-            department="Engineering",
-            location_type=LocationType.onsite,
-            employment_type=EmploymentType.internship,
-            exp_min=0,
-            exp_max=1,
-            ctc_min=300_000,
-            ctc_max=500_000,
-            skills=["python", "react"],
-            deadline=today + timedelta(days=60),
-        ),
-    ]
-
     jobs: list[Job] = []
-    for data in jobs_data:
-        job = Job(hr_id=hr.id, status=JobStatus.active, **data)
+    for spec in _JOB_CATALOGUE:
+        # Deadlines fan out from 7 to 75 days. A handful close in <14 days so
+        # the urgency-tinted deadline pills show up on the browse page.
+        deadline_offset = _RNG.randint(7, 75)
+        job = Job(
+            hr_id=hr.id,
+            status=JobStatus.active,
+            title=spec.title,
+            description=spec.description,
+            department=spec.department,
+            location_type=spec.location,
+            employment_type=spec.employment,
+            exp_min=spec.exp_min,
+            exp_max=spec.exp_max,
+            ctc_min=spec.ctc_min,
+            ctc_max=spec.ctc_max,
+            skills=spec.skills,
+            deadline=today + timedelta(days=deadline_offset),
+        )
         db.add(job)
         jobs.append(job)
     db.commit()
@@ -136,96 +355,97 @@ def _seed_jobs(db: Session, hr: User) -> list[Job]:
     return jobs
 
 
+# ---------- application generator ----------
+#
+# Build ~200 applications by sampling candidate↔job pairs, then assign a
+# stage according to a realistic funnel distribution.
+
+
+_STAGE_WEIGHTS: list[tuple[ApplicationStage, int]] = [
+    (ApplicationStage.applied, 40),
+    (ApplicationStage.screening, 22),
+    (ApplicationStage.interview, 15),
+    (ApplicationStage.offer, 8),
+    (ApplicationStage.hired, 5),
+    (ApplicationStage.rejected, 10),
+]
+
+_STAGE_PROGRESSION: list[ApplicationStage] = [
+    ApplicationStage.applied,
+    ApplicationStage.screening,
+    ApplicationStage.interview,
+    ApplicationStage.offer,
+    ApplicationStage.hired,
+]
+
+
+def _pick_stage() -> ApplicationStage:
+    population = [s for s, _ in _STAGE_WEIGHTS]
+    weights = [w for _, w in _STAGE_WEIGHTS]
+    return _RNG.choices(population, weights=weights, k=1)[0]
+
+
+def _cover_note_for(job: Job, candidate_skills: list[str]) -> str:
+    overlap = [s for s in candidate_skills if s in job.skills][:3]
+    if overlap:
+        return (
+            f"Excited about this {job.title} role at your team — happy to dig into "
+            f"my experience with {', '.join(overlap)} during the screen."
+        )
+    return (
+        f"Open to the {job.title} role and would love to hear more about how the team works "
+        "and what the first 90 days look like."
+    )
+
+
 def _seed_applications(
-    db: Session, jobs: list[Job], primary_candidate: User, others: list[User]
+    db: Session,
+    jobs: list[Job],
+    primary_candidate: User,
+    pool: list[User],
 ) -> None:
-    # Only seed apps if the primary candidate has none yet (idempotency anchor).
     has_any = db.scalar(
         select(Application).where(Application.candidate_id == primary_candidate.id).limit(1)
     )
     if has_any is not None:
         return
 
-    by_title = {j.title: j for j in jobs}
-    seeds = [
-        # Primary candidate applies to two jobs.
-        dict(
-            candidate=primary_candidate,
-            job=by_title["Senior Backend Engineer"],
-            stage=ApplicationStage.screening,
+    hr_user = db.get(User, jobs[0].hr_id) if jobs else None
+
+    # Map candidate id → their spec so we can compute realistic CTC ranges
+    # for each application (current_ctc tracks YOE; expected_ctc nudges up).
+    spec_by_email = {s.email: s for s in _CANDIDATE_POOL}
+
+    # ----- anchor: the primary candidate gets a clean two-app pipeline -----
+    # Two named applications so the README's "log in as candidate and see
+    # your apps" walkthrough lands on real rows.
+    backend_jobs = [j for j in jobs if "Backend" in j.title]
+    frontend_jobs = [j for j in jobs if "Frontend" in j.title]
+    anchor_seeds: list[tuple[Job, ApplicationStage, dict]] = []
+    if backend_jobs:
+        anchor_seeds.append((backend_jobs[0], ApplicationStage.screening, dict(
             current_ctc=1_800_000,
             expected_ctc=3_200_000,
             notice_period_days=30,
             years_experience=6,
             skills=["python", "fastapi", "postgres", "docker"],
             cover_note="I've shipped Python microservices at scale and would love to lead backend here.",
-        ),
-        dict(
-            candidate=primary_candidate,
-            job=by_title["Frontend Engineer (React)"],
-            stage=ApplicationStage.applied,
+        )))
+    if frontend_jobs:
+        anchor_seeds.append((frontend_jobs[0], ApplicationStage.applied, dict(
             current_ctc=1_800_000,
             expected_ctc=2_400_000,
             notice_period_days=30,
             years_experience=4,
             skills=["react", "typescript", "css"],
             cover_note="React side-projects shipped; happy to discuss portfolio.",
-        ),
-        # Others fill the pipeline.
-        dict(
-            candidate=others[0],
-            job=by_title["Senior Backend Engineer"],
-            stage=ApplicationStage.interview,
-            current_ctc=2_400_000,
-            expected_ctc=3_800_000,
-            notice_period_days=60,
-            years_experience=8,
-            skills=["python", "fastapi", "kafka", "aws"],
-            cover_note="Built event-driven systems for the last 4 years; deep Python expertise.",
-        ),
-        dict(
-            candidate=others[1],
-            job=by_title["Senior Backend Engineer"],
-            stage=ApplicationStage.offer,
-            current_ctc=2_800_000,
-            expected_ctc=3_500_000,
-            notice_period_days=15,
-            years_experience=7,
-            skills=["python", "django", "postgres"],
-            cover_note="Looking for a remote-first role with strong engineering culture.",
-        ),
-        dict(
-            candidate=others[0],
-            job=by_title["Data Analyst"],
-            stage=ApplicationStage.applied,
-            current_ctc=1_200_000,
-            expected_ctc=1_700_000,
-            notice_period_days=0,
-            years_experience=3,
-            skills=["sql", "python", "looker"],
-            cover_note="Immediate joiner with end-to-end analytics experience.",
-        ),
-    ]
+        )))
 
-    stage_progression: list[ApplicationStage] = [
-        ApplicationStage.applied,
-        ApplicationStage.screening,
-        ApplicationStage.interview,
-        ApplicationStage.offer,
-        ApplicationStage.hired,
-    ]
+    created_pairs: set[tuple[int, int]] = set()
 
-    hr_user = db.get(User, jobs[0].hr_id) if jobs else None
-
-    for s in seeds:
-        candidate: User = s["candidate"]
-        job: Job = s["job"]
-        final_stage: ApplicationStage = s["stage"]
-
-        # Seed applications without a real resume — the candidate flow
-        # uploads one before applying, but the seed data predates the
-        # storage backend. HR will see "no resume on file" in the drawer
-        # for these rows, which mirrors a real "applied via referral" case.
+    def _persist_application(
+        candidate: User, job: Job, stage: ApplicationStage, fields: dict
+    ) -> None:
         application = Application(
             job_id=job.id,
             candidate_id=candidate.id,
@@ -234,57 +454,95 @@ def _seed_applications(
             resume_size_bytes=None,
             resume_content_type=None,
             resume_text=None,
-            cover_note=s["cover_note"],
-            current_ctc=s["current_ctc"],
-            expected_ctc=s["expected_ctc"],
-            notice_period_days=s["notice_period_days"],
-            years_experience=s["years_experience"],
-            skills=s["skills"],
-            stage=final_stage,
+            stage=stage,
+            **fields,
         )
         db.add(application)
         db.flush()
 
-        # Seed a plausible event history walking from "applied" up to the final stage.
-        if final_stage == ApplicationStage.rejected:
+        # Walk the stage history so the timeline view has something to show
+        # instead of just one event per row.
+        if stage == ApplicationStage.rejected:
             walk = [ApplicationStage.applied, ApplicationStage.rejected]
         else:
             walk = []
-            for stage in stage_progression:
-                walk.append(stage)
-                if stage == final_stage:
+            for s in _STAGE_PROGRESSION:
+                walk.append(s)
+                if s == stage:
                     break
 
         previous: ApplicationStage | None = None
-        for stage in walk:
+        for s in walk:
             db.add(
                 ApplicationEvent(
                     application_id=application.id,
                     from_stage=previous,
-                    to_stage=stage,
-                    changed_by_user_id=candidate.id if previous is None else (hr_user.id if hr_user else candidate.id),
+                    to_stage=s,
+                    changed_by_user_id=(
+                        candidate.id if previous is None else (hr_user.id if hr_user else candidate.id)
+                    ),
                 )
             )
-            previous = stage
+            previous = s
+
+    for job, stage, fields in anchor_seeds:
+        _persist_application(primary_candidate, job, stage, fields)
+        created_pairs.add((primary_candidate.id, job.id))
+
+    # ----- bulk fill -----
+    # Each pool candidate applies to between 5 and 12 jobs, with stages
+    # drawn from the funnel weights. Unique (candidate_id, job_id) is
+    # enforced by the DB unique index — we shadow-check here to avoid
+    # IntegrityError noise.
+
+    for candidate in pool:
+        spec = spec_by_email.get(candidate.email)
+        n_apps = _RNG.randint(5, 12)
+        candidate_jobs = _RNG.sample(jobs, k=min(n_apps, len(jobs)))
+        for job in candidate_jobs:
+            key = (candidate.id, job.id)
+            if key in created_pairs:
+                continue
+            stage = _pick_stage()
+            # Current CTC drifts ±15% off the spec base; expected steps
+            # up 20-45% on top so the offer-band filters are meaningful.
+            current = spec.base_ctc if spec else 1_500_000
+            current = int(current * _RNG.uniform(0.85, 1.15))
+            expected = int(current * _RNG.uniform(1.2, 1.45))
+            notice = _RNG.choice([0, 15, 30, 60, 90])
+            yoe = spec.years_experience if spec else _RNG.randint(0, 10)
+            yoe = max(0, yoe + _RNG.randint(-1, 1))
+            skills = spec.skills if spec else ["python"]
+            _persist_application(
+                candidate,
+                job,
+                stage,
+                dict(
+                    current_ctc=current,
+                    expected_ctc=expected,
+                    notice_period_days=notice,
+                    years_experience=yoe,
+                    skills=skills,
+                    cover_note=_cover_note_for(job, skills),
+                ),
+            )
+            created_pairs.add(key)
+
     db.commit()
 
-    # One illustrative HR note on the offer-stage candidate.
+    # One illustrative HR note so the drawer has something on first load.
     offer_app = db.scalar(
-        select(Application)
-        .where(Application.job_id == by_title["Senior Backend Engineer"].id)
-        .where(Application.stage == ApplicationStage.offer)
+        select(Application).where(Application.stage == ApplicationStage.offer).limit(1)
     )
-    if offer_app is not None and not offer_app.notes:
-        hr_user = db.get(User, jobs[0].hr_id)
-        if hr_user is not None:
-            db.add(
-                ApplicationNote(
-                    application_id=offer_app.id,
-                    hr_id=hr_user.id,
-                    body="Strong system-design round. Pending finance sign-off on offer.",
-                )
+    if offer_app is not None and not offer_app.notes and hr_user is not None:
+        db.add(
+            ApplicationNote(
+                application_id=offer_app.id,
+                hr_id=hr_user.id,
+                body="Strong system-design round. Pending finance sign-off on offer.",
             )
-            db.commit()
+        )
+        db.commit()
 
 
 def run_seed() -> None:
@@ -297,33 +555,31 @@ def run_seed() -> None:
             full_name="Priya Sharma (HR)",
             role=UserRole.hr,
         )
-        candidate = _get_or_create_user(
+        primary_candidate = _get_or_create_user(
             db,
             email=settings.seed_candidate_email,
             password=settings.seed_candidate_password.get_secret_value(),
             full_name="Arjun Kumar",
             role=UserRole.candidate,
         )
-        other_1 = _get_or_create_user(
-            db,
-            email="rohan.designer@test.com",
-            password="Test@1234",
-            full_name="Rohan Mehta",
-            role=UserRole.candidate,
-        )
-        other_2 = _get_or_create_user(
-            db,
-            email="sneha.engineer@test.com",
-            password="Test@1234",
-            full_name="Sneha Patel",
-            role=UserRole.candidate,
-        )
 
+        pool = _seed_candidates(db)
         jobs = _seed_jobs(db, hr)
-        _seed_applications(db, jobs, candidate, [other_1, other_2])
+        _seed_applications(db, jobs, primary_candidate, pool)
+
+        # Boot log gives the operator a quick "did the bulk seed actually
+        # run?" sanity check.
+        from sqlalchemy import func
+
+        total_apps = db.scalar(select(func.count(Application.id))) or 0
 
         logger.info(
-            "Seed complete: HR=%s, Candidate=%s, Jobs=%d", hr.email, candidate.email, len(jobs)
+            "Seed complete: HR=%s, primary candidate=%s, demo candidates=%d, jobs=%d, applications=%d",
+            hr.email,
+            primary_candidate.email,
+            len(pool),
+            len(jobs),
+            total_apps,
         )
 
 
