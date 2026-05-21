@@ -61,26 +61,14 @@ Auth uses short-lived JWTs (HS256, 30-minute expiry); the secret is read from `J
 git clone git@github.com:karu19961j/skypoint-assessment.git
 cd skypoint-assessment
 cp .env.example .env
-```
-
-Open `.env` in your editor and replace every `replace-with-…` placeholder with a real value before booting:
-
-- `POSTGRES_PASSWORD` — any strong string; the postgres container creates the role with it on first boot.
-- `JWT_SECRET` — a 32+ char random string. Generate one with `openssl rand -hex 32`.
-- `DATABASE_URL` — re-paste the same `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` you chose above into the URL so the backend connects to the role the postgres container actually created.
-- `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` — boot the MinIO admin account. The same values go into `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` (the backend reuses the root credentials in the demo; production would provision a scoped service user).
-
-The seed credentials (`SEED_HR_PASSWORD`, `SEED_CANDIDATE_PASSWORD`) are pre-filled with the demo logins the README documents below; leave them as-is unless you want different demo accounts.
-
-Then bring up the stack:
-
-```bash
 docker compose up --build
 ```
 
-Open **http://localhost:5173** in your browser.
+Then open **http://localhost:5173** in your browser.
 
-The backend waits for Postgres' health check, runs `Base.metadata.create_all` to set up the schema, and idempotently seeds the demo data on every startup. The whole stack is ready when you see `Application startup complete.` in the backend logs.
+The backend waits for Postgres' health check, runs `Base.metadata.create_all` to set up the schema, idempotently seeds the demo data, and creates the MinIO resume bucket. The whole stack is ready when you see `Application startup complete.` in the backend logs.
+
+> The committed `.env.example` ships with demo-only secrets that boot the stack out of the box. Comments in the file flag every value that should be rotated for any non-local deployment — see §7 *Configuration & Secrets* for the local / CI / prod tier story.
 
 To stop and remove data:
 
@@ -237,7 +225,7 @@ Configuration follows a three-tier model. The application code is **source-agnos
 
 | Tier        | Source                                                                                  | What's in scope                                                                |
 |-------------|-----------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
-| **Local**   | A developer's `.env` (gitignored). `.env.example` ships obvious-sample placeholders.    | `JWT_SECRET=replace-with-…`, `POSTGRES_PASSWORD=replace-with-…`, `MINIO_ROOT_PASSWORD=replace-with-…`, the seeded demo passwords, Docker-network URLs. |
+| **Local**   | A developer's `.env` (gitignored). `.env.example` ships demo-only secrets that boot the stack out of the box; comments flag what to rotate before non-local use. | `JWT_SECRET=local-demo-…`, `POSTGRES_PASSWORD=jobportal_demo_password`, `MINIO_ROOT_PASSWORD=minio_demo_password`, the seeded demo passwords, Docker-network URLs. |
 | **CI**      | GitHub Actions secrets, injected as env vars by the workflow.                            | A real `JWT_SECRET` per branch; `pytest` against a Postgres service container. |
 | **Prod**    | A real secrets manager (Vault, AWS Secrets Manager, GCP Secret Manager).                 | Rotated `JWT_SECRET`, DB credentials, etc.                                     |
 
