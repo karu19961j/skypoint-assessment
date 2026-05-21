@@ -34,7 +34,7 @@ export function HrAllApplicantsPage() {
 
   // Debounce the whole filter object before it hits React Query. The
   // sidebar inputs stay snappy; the API call lags by 300ms.
-  const debouncedFilters = useDebouncedValue(filters, 300);
+  const debouncedFilters = useDebouncedValue(filters, 400);
   const apiFilters = useMemo(
     () => crossJobFiltersToApi(debouncedFilters),
     [debouncedFilters],

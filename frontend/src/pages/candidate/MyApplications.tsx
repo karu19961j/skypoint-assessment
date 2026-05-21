@@ -22,7 +22,7 @@ export function MyApplicationsPage() {
 
   // Debounce the keyword input so typing 'data analyst' doesn't issue
   // 11 fetches. Stage + sort are dropdown clicks — left undebounced.
-  const debouncedQ = useDebouncedValue(q.trim(), 300);
+  const debouncedQ = useDebouncedValue(q.trim(), 400);
   const filters = { stage: stage || undefined, q: debouncedQ || undefined, sort };
 
   const { data: apps = [], error, isLoading } = useQuery({

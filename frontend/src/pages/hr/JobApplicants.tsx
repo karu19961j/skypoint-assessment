@@ -38,7 +38,7 @@ export function HrJobApplicantsPage() {
   // controlled inputs snappy while the API call lags at human-typing
   // cadence. Filter clicks (chips, selects) feel immediate-enough
   // through a 300ms delay; the keyword/number inputs benefit most.
-  const debouncedFilters = useDebouncedValue(filters, 300);
+  const debouncedFilters = useDebouncedValue(filters, 400);
   const apiFilters = useMemo(
     () => applicantFiltersToApi(debouncedFilters),
     [debouncedFilters],
