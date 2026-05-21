@@ -63,7 +63,7 @@ Then open **http://localhost:5173** in your browser.
 
 The backend waits for Postgres' health check, runs `Base.metadata.create_all` to set up the schema, and idempotently seeds the demo data on every startup. The whole stack is ready when you see `Application startup complete.` in the backend logs.
 
-> No additional setup is required. All configuration lives in `.env`; the committed `.env.example` documents every value and ships with safe local defaults.
+> No additional setup is required. All configuration lives in `.env`; the committed `.env.example` documents every value and ships with sample placeholders (tagged `replace-with-…`) that still boot the stack out of the box — swap them for real values before any non-local use.
 
 To stop and remove data:
 
@@ -210,7 +210,7 @@ Configuration follows a three-tier model. The application code is **source-agnos
 
 | Tier        | Source                                                                                  | What's in scope                                                                |
 |-------------|-----------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
-| **Local**   | A developer's `.env` (gitignored). `.env.example` ships safe defaults.                  | `JWT_SECRET=assessment-only-…`, the seeded passwords, Docker-network URLs.    |
+| **Local**   | A developer's `.env` (gitignored). `.env.example` ships obvious-sample placeholders.    | `JWT_SECRET=replace-with-…`, `POSTGRES_PASSWORD=replace-with-…`, the seeded demo passwords, Docker-network URLs. |
 | **CI**      | GitHub Actions secrets, injected as env vars by the workflow.                            | A real `JWT_SECRET` per branch; `pytest` against a Postgres service container. |
 | **Prod**    | A real secrets manager (Vault, AWS Secrets Manager, GCP Secret Manager).                 | Rotated `JWT_SECRET`, DB credentials, etc.                                     |
 
@@ -320,6 +320,6 @@ These were added on top of the brief's checklist to make the app more memorable:
 - **Single HR user** owns the seeded jobs. Multi-HR collaboration on the same job (shared pipelines) is not modelled; each job is owned by one HR.
 - **Email verification, password reset, and account recovery** flows are intentionally out of scope.
 - **No Redis caching layer.** The ranking / recommendation / dashboard queries are sub-millisecond at the seed scale, but a production deployment with thousands of jobs would benefit from caching them.
-- **HR self-signup is enabled by default for the demo** (`ALLOW_HR_SELF_REGISTER=true` in `.env.example`). Production should flip this to `false` and provision HR via an admin/invite flow — the backend already enforces the gate either way.
+- **HR self-signup is disabled by default** (`ALLOW_HR_SELF_REGISTER=false` in `.env.example`). The seeded HR account is the only path in for the demo; flip the flag to `true` only if you want the public `/register` form to accept HR signups too. Production would gate this behind an admin/invite flow regardless — the backend enforces it either way.
 - **Skills as a comma-separated text field** rather than a pill-style tag input. The data shape is the same (a string array on the wire), but the UX is simpler.
 - **No drag-and-drop Kanban** for the pipeline. The stage dropdown moves a candidate just as quickly, keeps the layout responsive on mobile, and avoids a lot of focus-management work that drag-and-drop forces.
