@@ -100,10 +100,31 @@ def _ctc_alignment_score(
     return round(max_points * _clamp(1 - over / max(job_max, 1)))
 
 
+# Notice-period bonus is a discrete bucket table — matches the HR filter
+# dropdown (Immediate / 15 / 30 / 60 / 90 days) so the bonus value is
+# intuitive when HR sees it next to the filter, and so a product tune is
+# one row edit. Each entry is (inclusive_upper_days, points); anything
+# past the last bucket scores 0 (a candidate with > 60 days notice is
+# already filtered out of the "immediate joiner" win condition).
+_NOTICE_BUCKETS: tuple[tuple[int, int], ...] = (
+    (0, 5),    # immediate joiner — full bonus
+    (15, 4),
+    (30, 3),
+    (60, 2),
+)
+
+
 def _notice_bonus_score(notice_days: int, max_points: int = NOTICE_POINTS) -> int:
-    """Immediate joiner = full bonus; linearly fades to zero at 90 days+."""
+    """Immediate joiner gets full bonus; bucket falls off to 0 past 90 days.
+
+    All maths is integer — there's no float drift to round off, so the
+    displayed badge value never shows `82.99` when the spec says 83.
+    """
     notice_days = max(0, notice_days)
-    return round(max_points * _clamp(1 - notice_days / 90))
+    for upper, points in _NOTICE_BUCKETS:
+        if notice_days <= upper:
+            return min(points, max_points)
+    return 0
 
 
 @dataclass(frozen=True)
@@ -163,7 +184,13 @@ def score_job_for_profile(
     exp = _experience_fit_score(profile_years, job_exp_min, job_exp_max)
     ctc = _ctc_alignment_score(profile_expected_ctc, job_ctc_min, job_ctc_max)
     notice = 0  # candidate profile has no notice period; that's per-application
-    location = LOCATION_POINTS if job_location_type in profile_preferred_locations else 0
+    # Normalise both sides through `normalize_skill()` so a free-text
+    # "Remote" or "REMOTE" in profile_preferred_locations still matches
+    # the enum's lowercase "remote" on job_location_type.
+    normalized_pref = {normalize_skill(loc) for loc in profile_preferred_locations}
+    location = (
+        LOCATION_POINTS if normalize_skill(job_location_type) in normalized_pref else 0
+    )
     total = min(TOTAL_CAP, skill + exp + ctc + notice + location)
     return ScoreBreakdown(
         total=total, skill=skill, exp=exp, ctc=ctc, notice=notice,
