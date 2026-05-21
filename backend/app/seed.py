@@ -38,6 +38,9 @@ from app.models import (
     ApplicationEvent,
     ApplicationNote,
     ApplicationStage,
+    CandidateEducation,
+    CandidateExperience,
+    CandidateProfile,
     EmploymentType,
     Job,
     JobStatus,
@@ -117,8 +120,154 @@ _CANDIDATE_POOL: list[_CandidateSpec] = [
 ]
 
 
-def _seed_candidates(db: Session) -> list[User]:
-    users: list[User] = []
+_INSTITUTIONS = [
+    "IIT Bombay", "IIT Delhi", "IIT Madras", "BITS Pilani", "NIT Trichy",
+    "VIT Vellore", "Manipal Institute", "Stanford University", "MIT",
+    "Carnegie Mellon", "University of Waterloo", "ETH Zürich",
+]
+_DEGREES = ["B.Tech", "B.E.", "M.Tech", "MS", "MBA"]
+_FIELDS = [
+    "Computer Science", "Information Technology", "Electronics",
+    "Data Science", "Software Engineering", "Mechanical Engineering",
+]
+_COMPANIES = [
+    "Acme Corp", "Globex", "Initech", "Vehement Capital", "Stark Industries",
+    "Wayne Enterprises", "Hooli", "Pied Piper", "Aperture Labs",
+    "Massive Dynamic", "Cyberdyne Systems", "Tyrell Corp",
+]
+
+
+def _generate_experience_for(spec: _CandidateSpec) -> list[dict]:
+    """Synthesize 1-2 prior-job entries that line up with the candidate's
+    total YOE. Last role is "current" (is_current=True), prior role (if
+    any) is dated to land back-to-back."""
+    if spec.years_experience <= 0:
+        return []
+    today = date.today()
+    if spec.years_experience <= 3:
+        return [
+            dict(
+                company=_RNG.choice(_COMPANIES),
+                role=f"{_RNG.choice(['Junior', 'Software'])} Engineer",
+                from_date=today.replace(year=today.year - spec.years_experience),
+                to_date=None,
+                is_current=True,
+                description=None,
+            )
+        ]
+    # >3y: split into 2 stints
+    split = max(1, spec.years_experience // 2)
+    prior_start = today.replace(year=today.year - spec.years_experience)
+    prior_end = today.replace(year=today.year - split)
+    return [
+        dict(
+            company=_RNG.choice(_COMPANIES),
+            role="Senior Engineer" if spec.years_experience >= 6 else "Engineer",
+            from_date=today.replace(year=today.year - split),
+            to_date=None,
+            is_current=True,
+            description=None,
+        ),
+        dict(
+            company=_RNG.choice(_COMPANIES),
+            role="Engineer",
+            from_date=prior_start,
+            to_date=prior_end,
+            is_current=False,
+            description=None,
+        ),
+    ]
+
+
+def _generate_education_for(spec: _CandidateSpec) -> list[dict]:
+    """One education entry per candidate. Graduation year is roughly
+    today - (years_experience + 22) so freshers graduated this year."""
+    today = date.today()
+    grad_year = today.year - max(0, spec.years_experience)
+    return [
+        dict(
+            institution=_RNG.choice(_INSTITUTIONS),
+            degree=_RNG.choice(_DEGREES),
+            field_of_study=_RNG.choice(_FIELDS),
+            from_year=grad_year - 4,
+            to_year=grad_year,
+        )
+    ]
+
+
+def _profile_snapshot_for(profile: CandidateProfile) -> dict:
+    """Mirror of `lifecycle._profile_snapshot` — kept here so the seed
+    doesn't need to import a private helper. Stays in sync with the
+    apply path's serialization."""
+    return {
+        "is_fresher": profile.is_fresher,
+        "experiences": [
+            {
+                "company": e.company,
+                "role": e.role,
+                "from_date": e.from_date.isoformat() if e.from_date else None,
+                "to_date": e.to_date.isoformat() if e.to_date else None,
+                "is_current": e.is_current,
+                "description": e.description,
+            }
+            for e in (profile.experiences or [])
+        ],
+        "educations": [
+            {
+                "institution": d.institution,
+                "degree": d.degree,
+                "field_of_study": d.field_of_study,
+                "from_year": d.from_year,
+                "to_year": d.to_year,
+            }
+            for d in (profile.educations or [])
+        ],
+    }
+
+
+def _seed_profile(db: Session, user: User, spec: _CandidateSpec) -> CandidateProfile:
+    """Create (or fetch) a profile for `user` populated from `spec`. The
+    profile carries the same data the candidate would have entered on
+    /me/profile in the demo; we exercise the same shape the apply
+    endpoint expects so HR-drawer rendering is identical."""
+    profile = db.scalar(
+        select(CandidateProfile).where(CandidateProfile.user_id == user.id)
+    )
+    if profile is not None:
+        return profile
+
+    is_fresher = spec.years_experience == 0
+    profile = CandidateProfile(
+        user_id=user.id,
+        skills=spec.skills,
+        is_fresher=is_fresher,
+        years_experience=spec.years_experience,
+        current_ctc=0 if is_fresher else int(spec.base_ctc * _RNG.uniform(0.85, 1.15)),
+        expected_ctc=int(spec.base_ctc * _RNG.uniform(1.15, 1.4)),
+        notice_period_days=_RNG.choice([0, 15, 30, 60, 90]),
+        preferred_locations=[_RNG.choice(["remote", "hybrid", "onsite"])],
+        # No resume on seed profiles — HR drawer shows "No resume on file"
+        # for the seeded applications. The primary candidate uploads on
+        # the /me/profile page to exercise the apply flow end-to-end.
+        resume_key=None,
+    )
+    db.add(profile)
+    db.flush()
+
+    for exp in _generate_experience_for(spec):
+        db.add(CandidateExperience(candidate_id=profile.id, **exp))
+    for edu in _generate_education_for(spec):
+        db.add(CandidateEducation(candidate_id=profile.id, **edu))
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+def _seed_candidates(db: Session) -> list[tuple[User, CandidateProfile]]:
+    """Provision each pool candidate as user + populated profile. The
+    profile is what the bulk-apply step snapshots into Application rows,
+    so this needs to happen first."""
+    out: list[tuple[User, CandidateProfile]] = []
     for spec in _CANDIDATE_POOL:
         user = _get_or_create_user(
             db,
@@ -127,8 +276,9 @@ def _seed_candidates(db: Session) -> list[User]:
             full_name=spec.full_name,
             role=UserRole.candidate,
         )
-        users.append(user)
-    return users
+        profile = _seed_profile(db, user, spec)
+        out.append((user, profile))
+    return out
 
 
 # ---------- job catalogue ----------
@@ -402,7 +552,7 @@ def _seed_applications(
     db: Session,
     jobs: list[Job],
     primary_candidate: User,
-    pool: list[User],
+    pool: list[tuple[User, CandidateProfile]],
 ) -> None:
     has_any = db.scalar(
         select(Application).where(Application.candidate_id == primary_candidate.id).limit(1)
@@ -444,7 +594,11 @@ def _seed_applications(
     created_pairs: set[tuple[int, int]] = set()
 
     def _persist_application(
-        candidate: User, job: Job, stage: ApplicationStage, fields: dict
+        candidate: User,
+        job: Job,
+        stage: ApplicationStage,
+        fields: dict,
+        snapshot: dict | None = None,
     ) -> None:
         application = Application(
             job_id=job.id,
@@ -454,6 +608,7 @@ def _seed_applications(
             resume_size_bytes=None,
             resume_content_type=None,
             resume_text=None,
+            profile_snapshot=snapshot,
             stage=stage,
             **fields,
         )
@@ -485,8 +640,17 @@ def _seed_applications(
             )
             previous = s
 
+    # Primary candidate's profile (if seeded) → snapshot for the anchor apps.
+    primary_profile = db.scalar(
+        select(CandidateProfile).where(CandidateProfile.user_id == primary_candidate.id)
+    )
+    primary_snapshot = (
+        _profile_snapshot_for(primary_profile) if primary_profile is not None else None
+    )
     for job, stage, fields in anchor_seeds:
-        _persist_application(primary_candidate, job, stage, fields)
+        _persist_application(
+            primary_candidate, job, stage, fields, snapshot=primary_snapshot
+        )
         created_pairs.add((primary_candidate.id, job.id))
 
     # ----- bulk fill -----
@@ -495,36 +659,31 @@ def _seed_applications(
     # enforced by the DB unique index — we shadow-check here to avoid
     # IntegrityError noise.
 
-    for candidate in pool:
-        spec = spec_by_email.get(candidate.email)
+    for candidate, profile in pool:
         n_apps = _RNG.randint(5, 12)
         candidate_jobs = _RNG.sample(jobs, k=min(n_apps, len(jobs)))
+        snapshot = _profile_snapshot_for(profile)
         for job in candidate_jobs:
             key = (candidate.id, job.id)
             if key in created_pairs:
                 continue
             stage = _pick_stage()
-            # Current CTC drifts ±15% off the spec base; expected steps
-            # up 20-45% on top so the offer-band filters are meaningful.
-            current = spec.base_ctc if spec else 1_500_000
-            current = int(current * _RNG.uniform(0.85, 1.15))
-            expected = int(current * _RNG.uniform(1.2, 1.45))
-            notice = _RNG.choice([0, 15, 30, 60, 90])
-            yoe = spec.years_experience if spec else _RNG.randint(0, 10)
-            yoe = max(0, yoe + _RNG.randint(-1, 1))
-            skills = spec.skills if spec else ["python"]
+            # Snapshot the filterable fields straight from the profile —
+            # mirror of what the apply endpoint does when a real candidate
+            # hits POST /api/applications.
             _persist_application(
                 candidate,
                 job,
                 stage,
                 dict(
-                    current_ctc=current,
-                    expected_ctc=expected,
-                    notice_period_days=notice,
-                    years_experience=yoe,
-                    skills=skills,
-                    cover_note=_cover_note_for(job, skills),
+                    current_ctc=profile.current_ctc,
+                    expected_ctc=profile.expected_ctc,
+                    notice_period_days=profile.notice_period_days,
+                    years_experience=profile.years_experience,
+                    skills=list(profile.skills or []),
+                    cover_note=_cover_note_for(job, list(profile.skills or [])),
                 ),
+                snapshot=snapshot,
             )
             created_pairs.add(key)
 
@@ -555,7 +714,7 @@ def run_seed() -> None:
             full_name="Priya Sharma (HR)",
             role=UserRole.hr,
         )
-        primary_candidate = _get_or_create_user(
+        primary_user = _get_or_create_user(
             db,
             email=settings.seed_candidate_email,
             password=settings.seed_candidate_password.get_secret_value(),
@@ -563,9 +722,23 @@ def run_seed() -> None:
             role=UserRole.candidate,
         )
 
+        # Primary candidate profile — populated so applying to a new job in
+        # the demo works (skills, exp, CTC, education snapshot into the
+        # application). Resume is intentionally NOT preloaded so the
+        # assessor sees the "upload your CV on your profile before applying"
+        # gate when they exercise the apply flow.
+        primary_spec = _CandidateSpec(
+            full_name="Arjun Kumar",
+            email=settings.seed_candidate_email,
+            skills=["python", "fastapi", "postgres", "docker", "react"],
+            years_experience=6,
+            base_ctc=2_400_000,
+        )
+        _seed_profile(db, primary_user, primary_spec)
+
         pool = _seed_candidates(db)
         jobs = _seed_jobs(db, hr)
-        _seed_applications(db, jobs, primary_candidate, pool)
+        _seed_applications(db, jobs, primary_user, pool)
 
         # Boot log gives the operator a quick "did the bulk seed actually
         # run?" sanity check.
@@ -576,7 +749,7 @@ def run_seed() -> None:
         logger.info(
             "Seed complete: HR=%s, primary candidate=%s, demo candidates=%d, jobs=%d, applications=%d",
             hr.email,
-            primary_candidate.email,
+            primary_user.email,
             len(pool),
             len(jobs),
             total_apps,
