@@ -82,3 +82,17 @@ class ApplicationEventOut(BaseModel):
     to_stage: ApplicationStage
     changed_by_user_id: int
     created_at: datetime
+
+
+class ScoreBreakdownOut(BaseModel):
+    total: int
+    skill: int
+    exp: int
+    ctc: int
+    notice: int
+    location: int
+    matched_skills: list[str]
+
+
+class RankedApplicationOut(ApplicationDetail):
+    score: ScoreBreakdownOut
