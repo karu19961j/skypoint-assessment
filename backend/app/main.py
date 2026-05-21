@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -6,6 +8,23 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.config import get_settings
 from app.db import engine
 from app.routers import applications, auth, bookmarks, dashboard, jobs, profile
+
+
+class _SuppressHealthLogs(logging.Filter):
+    """Drop `/api/health` lines from uvicorn's access log.
+
+    Docker's HEALTHCHECK polls the endpoint every 30s; without this filter
+    those probes dominate the steady-state log stream and bury anything
+    meaningful (a developer tailing `docker compose logs backend` would
+    have to scroll past dozens of `200 OK /api/health` lines for every
+    real request).
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/api/health" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_SuppressHealthLogs())
 
 settings = get_settings()
 

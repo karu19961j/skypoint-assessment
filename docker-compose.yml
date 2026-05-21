@@ -37,14 +37,17 @@ services:
     expose:
       - "8000"
     healthcheck:
-      # Healthy = `/api/health` returns 200 AND reports `db: ok` (the
-      # bootstrap migration + seed has finished). The frontend depends on
-      # this state so nginx never proxies to a half-warm backend.
+      # `docker inspect` reports the backend's health (ops can use it),
+      # but the frontend deliberately does NOT gate on it: nginx retries
+      # the upstream during the first second of startup, which is
+      # plenty for the bootstrap to finish. 30s interval keeps the
+      # probe quiet — the uvicorn access filter in main.py also drops
+      # /api/health entries from the access log entirely.
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health | grep -q '\"db\":\"ok\"'"]
-      interval: 5s
+      interval: 30s
       timeout: 3s
-      retries: 30
-      start_period: 10s
+      retries: 5
+      start_period: 15s
     networks:
       - jobportal
 
@@ -53,8 +56,7 @@ services:
       context: ./frontend
     restart: unless-stopped
     depends_on:
-      backend:
-        condition: service_healthy
+      - backend
     ports:
       - "5173:80"
     networks:
