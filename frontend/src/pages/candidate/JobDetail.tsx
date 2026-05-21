@@ -1,17 +1,12 @@
-import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useForm } from "react-hook-form";
 import { Link, useParams } from "react-router-dom";
-import { z } from "zod";
 
-import { applicationsApi, bookmarksApi, jobsApi } from "@/api/endpoints";
+import { applicationsApi, bookmarksApi, jobsApi, profileApi } from "@/api/endpoints";
 import { queryKeys } from "@/api/queryKeys";
-import type { ApplicationCreate, ResumeUploadResponse } from "@/api/types";
+import type { ApplicationCreate } from "@/api/types";
 import { DeadlinePill } from "@/components/DeadlinePill";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { ResumeUpload } from "@/components/ResumeUpload";
-import { TagInput } from "@/components/TagInput";
 import {
   employmentLabel,
   formatCtcRange,
@@ -20,42 +15,13 @@ import {
 } from "@/lib/format";
 import { notify, notifyError } from "@/lib/toast";
 
-const applySchema = z.object({
-  cover_note: z.string().max(5000, "Cover note too long"),
-  current_ctc: z.coerce.number().int().min(0),
-  expected_ctc: z.coerce.number().int().min(0),
-  notice_period_days: z.coerce.number().int().min(0).max(365),
-  years_experience: z.coerce.number().int().min(0).max(60),
-});
-
-type ApplyValues = z.infer<typeof applySchema>;
-
 export function CandidateJobDetailPage() {
   const queryClient = useQueryClient();
   const { id } = useParams<{ id: string }>();
   const jobId = Number(id);
 
   const [showForm, setShowForm] = useState(false);
-  const [skills, setSkills] = useState<string[]>([]);
-  const [resume, setResume] = useState<ResumeUploadResponse | null>(null);
-  const [autofillNotice, setAutofillNotice] = useState<string | null>(null);
-
-  const {
-    register,
-    handleSubmit,
-    setValue,
-    formState: { errors },
-    reset,
-  } = useForm<ApplyValues>({
-    resolver: zodResolver(applySchema),
-    defaultValues: {
-      cover_note: "",
-      current_ctc: 0,
-      expected_ctc: 0,
-      notice_period_days: 30,
-      years_experience: 0,
-    },
-  });
+  const [coverNote, setCoverNote] = useState("");
 
   const jobQuery = useQuery({
     queryKey: queryKeys.jobs.detail(jobId),
@@ -75,6 +41,19 @@ export function CandidateJobDetailPage() {
   });
   const applied = (myApps.data ?? []).some((a) => a.job_id === jobId);
 
+  // Profile drives apply readiness — no profile → CTA to /me/profile;
+  // no resume on profile → CTA to upload one. UI gating mirrors what
+  // the backend would reject (profile is required server-side; resume
+  // is best-effort but enforced UI-side for a clean candidate flow).
+  const profileQuery = useQuery({
+    queryKey: queryKeys.profile.me(),
+    queryFn: () => profileApi.get(),
+  });
+  const profile = profileQuery.data;
+  const profileMissing = !profile;
+  const resumeMissing = !!profile && !profile.resume;
+  const canApply = !!profile && !!profile.resume;
+
   const addBookmark = useMutation({
     mutationFn: () => bookmarksApi.add(jobId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.bookmarks.all() }),
@@ -93,56 +72,16 @@ export function CandidateJobDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.applications.all() });
       setShowForm(false);
-      setSkills([]);
-      setResume(null);
-      setAutofillNotice(null);
-      reset();
+      setCoverNote("");
       notify.success("Application submitted.");
     },
     onError: (err) => notifyError(err, "Failed to apply"),
   });
 
-  const onResumeUploaded = (result: ResumeUploadResponse) => {
-    setResume(result);
-    const newSkills = Array.from(
-      new Set([...skills, ...result.autofill.skills.filter(Boolean)]),
-    );
-    const skillsChanged = newSkills.length !== skills.length;
-    if (skillsChanged) setSkills(newSkills);
-
-    let yoeApplied = false;
-    if (result.autofill.years_experience !== null) {
-      setValue("years_experience", result.autofill.years_experience, {
-        shouldValidate: true,
-      });
-      yoeApplied = true;
-    }
-
-    if (skillsChanged || yoeApplied) {
-      const bits: string[] = [];
-      if (skillsChanged)
-        bits.push(`${result.autofill.skills.length} matching skill${result.autofill.skills.length === 1 ? "" : "s"}`);
-      if (yoeApplied) bits.push(`${result.autofill.years_experience} year experience`);
-      setAutofillNotice(
-        `Pre-filled ${bits.join(" and ")} from your resume — please review before submitting.`,
-      );
-    } else {
-      setAutofillNotice(null);
-    }
+  const onApply = (e: React.FormEvent) => {
+    e.preventDefault();
+    applyMutation.mutate({ job_id: jobId, cover_note: coverNote.trim() });
   };
-
-  const onApply = handleSubmit((values) =>
-    applyMutation.mutate({
-      job_id: jobId,
-      resume_key: resume?.resume_key ?? null,
-      cover_note: values.cover_note,
-      current_ctc: values.current_ctc,
-      expected_ctc: values.expected_ctc,
-      notice_period_days: values.notice_period_days,
-      years_experience: values.years_experience,
-      skills,
-    }),
-  );
 
   const job = jobQuery.data;
   const jobError = jobQuery.error instanceof Error ? jobQuery.error.message : null;
@@ -202,109 +141,56 @@ export function CandidateJobDetailPage() {
         <form onSubmit={onApply} className="card space-y-4" noValidate>
           <h2 className="text-lg font-semibold">Apply to {job.title}</h2>
           <p className="text-xs text-slate-500">
-            Fields marked <span className="text-rose-600">*</span> are required.
+            Your profile travels with this application — we'll share your skills,
+            experience, education, expected CTC, notice period, and resume with
+            the recruiter for this role. Edit them anytime on{" "}
+            <Link to="/me/profile" className="text-brand-700 hover:underline">
+              /me/profile
+            </Link>
+            .
           </p>
 
-          <div>
-            <label className="label" htmlFor="apply-resume-file">
-              Resume <span aria-hidden="true" className="text-rose-600">*</span>
-              <span className="sr-only"> (required)</span>
-            </label>
-            <ResumeUpload jobId={jobId} onUploaded={onResumeUploaded} />
-            {autofillNotice ? (
-              <div
-                className="mt-2 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800"
-                role="status"
+          {profileMissing ? (
+            <div
+              role="alert"
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              You don't have a profile yet.{" "}
+              <Link
+                to="/me/profile"
+                className="font-medium text-amber-900 underline"
               >
-                ✨ {autofillNotice}
-              </div>
-            ) : null}
-          </div>
+                Complete your profile
+              </Link>{" "}
+              before applying.
+            </div>
+          ) : resumeMissing ? (
+            <div
+              role="alert"
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              Upload your CV on{" "}
+              <Link
+                to="/me/profile"
+                className="font-medium text-amber-900 underline"
+              >
+                your profile
+              </Link>{" "}
+              so it can be shared with this application.
+            </div>
+          ) : null}
+
           <div>
-            <label className="label" htmlFor="apply-cover">Cover note</label>
+            <label className="label" htmlFor="apply-cover">
+              Cover note <span className="text-xs font-normal text-slate-500">(optional)</span>
+            </label>
             <textarea
               id="apply-cover"
-              className="input min-h-[120px]"
-              aria-invalid={errors.cover_note ? "true" : undefined}
-              aria-describedby={errors.cover_note ? "apply-cover-error" : undefined}
-              {...register("cover_note")}
-            />
-            {errors.cover_note && (
-              <p id="apply-cover-error" role="alert" className="mt-1 text-xs text-rose-600">
-                {errors.cover_note.message}
-              </p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className="label" htmlFor="apply-yoe">
-                Years of experience <span aria-hidden="true" className="text-rose-600">*</span>
-                <span className="sr-only"> (required)</span>
-              </label>
-              <input
-                id="apply-yoe"
-                className="input"
-                type="number"
-                min={0}
-                aria-required="true"
-                aria-invalid={errors.years_experience ? "true" : undefined}
-                {...register("years_experience")}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="apply-notice">
-                Notice period (days) <span aria-hidden="true" className="text-rose-600">*</span>
-                <span className="sr-only"> (required)</span>
-              </label>
-              <input
-                id="apply-notice"
-                className="input"
-                type="number"
-                min={0}
-                aria-required="true"
-                aria-invalid={errors.notice_period_days ? "true" : undefined}
-                {...register("notice_period_days")}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="apply-current-ctc">
-                Current CTC (₹) <span aria-hidden="true" className="text-rose-600">*</span>
-                <span className="sr-only"> (required)</span>
-              </label>
-              <input
-                id="apply-current-ctc"
-                className="input"
-                type="number"
-                min={0}
-                aria-required="true"
-                {...register("current_ctc")}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="apply-expected-ctc">
-                Expected CTC (₹) <span aria-hidden="true" className="text-rose-600">*</span>
-                <span className="sr-only"> (required)</span>
-              </label>
-              <input
-                id="apply-expected-ctc"
-                className="input"
-                type="number"
-                min={0}
-                aria-required="true"
-                {...register("expected_ctc")}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="label" htmlFor="apply-skills">Key skills</label>
-            <TagInput
-              id="apply-skills"
-              value={skills}
-              onChange={setSkills}
-              placeholder="Type a skill and press Enter (e.g. python, fastapi)"
-              ariaLabel="Your key skills"
+              className="input min-h-[140px]"
+              placeholder="Anything you want the hiring team to know about you for this specific role…"
+              value={coverNote}
+              onChange={(e) => setCoverNote(e.target.value)}
+              maxLength={5000}
             />
           </div>
 
@@ -315,7 +201,7 @@ export function CandidateJobDetailPage() {
             <button
               type="submit"
               className="btn-primary"
-              disabled={applyMutation.isPending || !resume}
+              disabled={applyMutation.isPending || !canApply}
             >
               {applyMutation.isPending ? "Submitting…" : "Submit application"}
             </button>

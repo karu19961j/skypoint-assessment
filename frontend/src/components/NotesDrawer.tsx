@@ -18,6 +18,14 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatDateRange(from: string, to: string | null, isCurrent: boolean): string {
+  const fromY = from.slice(0, 4);
+  if (isCurrent) return `${fromY} – present`;
+  if (!to) return fromY;
+  const toY = to.slice(0, 4);
+  return fromY === toY ? fromY : `${fromY} – ${toY}`;
+}
+
 export function NotesDrawer({
   application: anonymized,
   onClose,
@@ -132,7 +140,14 @@ export function NotesDrawer({
 
         <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
           <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1">
-            <div className="text-slate-500">Experience</div>
+            <div className="text-slate-500">
+              Experience
+              {application.profile_snapshot?.is_fresher ? (
+                <span className="ml-1 rounded bg-emerald-100 px-1 text-[10px] text-emerald-800">
+                  Fresher
+                </span>
+              ) : null}
+            </div>
             <div className="font-medium text-slate-900">{application.years_experience}y</div>
           </div>
           <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1">
@@ -148,6 +163,50 @@ export function NotesDrawer({
             <div className="font-medium text-slate-900">{application.expected_ctc.toLocaleString("en-IN")}</div>
           </div>
         </div>
+
+        {application.profile_snapshot?.experiences?.length ? (
+          <details className="mt-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm" open>
+            <summary className="cursor-pointer font-medium text-slate-700">
+              Prior experience ({application.profile_snapshot.experiences.length})
+            </summary>
+            <ul className="mt-2 space-y-2">
+              {application.profile_snapshot.experiences.map((e, i) => (
+                <li key={i} className="text-xs">
+                  <div className="font-medium text-slate-900">
+                    {e.role} <span className="font-normal text-slate-500">@ {e.company}</span>
+                  </div>
+                  <div className="text-slate-500">
+                    {formatDateRange(e.from_date, e.to_date, e.is_current)}
+                  </div>
+                  {e.description ? (
+                    <p className="mt-1 whitespace-pre-wrap text-slate-700">{e.description}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+
+        {application.profile_snapshot?.educations?.length ? (
+          <details className="mt-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm" open>
+            <summary className="cursor-pointer font-medium text-slate-700">
+              Education ({application.profile_snapshot.educations.length})
+            </summary>
+            <ul className="mt-2 space-y-2">
+              {application.profile_snapshot.educations.map((d, i) => (
+                <li key={i} className="text-xs">
+                  <div className="font-medium text-slate-900">
+                    {d.degree}
+                    {d.field_of_study ? `, ${d.field_of_study}` : ""}
+                  </div>
+                  <div className="text-slate-500">
+                    {d.institution} · {d.from_year}–{d.to_year ?? "present"}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
           {application.resume?.filename ? (
