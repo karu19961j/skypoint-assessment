@@ -216,17 +216,26 @@ class InMemoryStorage:
 
 @pytest.fixture()
 def in_memory_storage(monkeypatch: pytest.MonkeyPatch) -> InMemoryStorage:
-    """Replace the storage singleton with an in-memory shim for the test."""
+    """Replace the storage singleton with an in-memory shim for the test.
+
+    The apply endpoint no longer touches storage directly (the resume is
+    bound to the candidate's profile, not to each application), so we
+    only patch the import sites that actually call `get_storage`:
+
+      - `app.services.storage` itself (the singleton)
+      - `app.routers.resume` (upload + per-application download)
+      - `app.routers.profile` (PUT validates the new resume_key + the
+        new GET /api/profile/resume streams it back inline)
+    """
     fake = InMemoryStorage()
     monkeypatch.setattr(storage_module, "_storage", fake)
     monkeypatch.setattr(storage_module, "get_storage", lambda: fake)
-    # Also patch the import sites that captured the symbol by name.
+    # Patch the import sites that captured `get_storage` by name.
+    from app.routers import profile as profile_router
     from app.routers import resume as resume_router
 
     monkeypatch.setattr(resume_router, "get_storage", lambda: fake)
-    from app.routers.applications import lifecycle
-
-    monkeypatch.setattr(lifecycle, "get_storage", lambda: fake)
+    monkeypatch.setattr(profile_router, "get_storage", lambda: fake)
     return fake
 
 
